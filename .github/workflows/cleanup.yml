@@ -1,0 +1,32 @@
+name: cleanup
+
+# 定时清理过期文件：每 6 小时调一次站内 /api/cleanup（带 TASK_SECRET），删掉过期文件与超时未完成的上传。
+# 需在仓库 Settings → Secrets and variables → Actions 里加：
+#   SITE_URL    —— 站点地址，如 https://ym-transfer.pages.dev（必填，缺了本次跳过）
+#   TASK_SECRET —— 清理接口密钥，与 Pages 后台配的同一个（必填，缺了本次跳过）
+# 清理接口是幂等的，偶发失败重试即可，重复触发不会多删。
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'   # UTC 每 6 小时 17 分 ≈ 北京时间 08:17 / 14:17 / 20:17 / 02:17
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 未配地址或密钥时给出提示并结束
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          TASK_SECRET: ${{ secrets.TASK_SECRET }}
+        run: |
+          if [ -z "$SITE_URL" ] || [ -z "$TASK_SECRET" ]; then
+            echo "未配置 SITE_URL / TASK_SECRET，跳过清理（属正常：部署时还没配好）。"
+            exit 0
+          fi
+      - name: 调清理接口
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          TASK_SECRET: ${{ secrets.TASK_SECRET }}
+        run: |
+          curl -fsS --retry 3 --retry-delay 15 --retry-all-errors -X POST "$SITE_URL/api/cleanup" -H "X-Task-Secret: $TASK_SECRET"
