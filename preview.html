@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>YM 传文件 · 免费传文件，不用注册</title>
+<meta name="description" content="YM 传文件：浏览器里直接传文件，不用注册、不用装 App，传完给一个下载链接，过期自动删除。单文件最大 5GB。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📤</text></svg>">
+<style>
+:root{
+  --bg:#0b1220; --panel:#111c30; --panel2:#0e1729; --line:#1e2c47;
+  --txt:#dbe6f5; --dim:#8498b3; --acc:#f6821f; --acc2:#2ea6ff;
+  --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c;
+  --radius:16px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:radial-gradient(1100px 480px at 50% -120px,rgba(246,130,31,.14),transparent 60%),radial-gradient(900px 500px at 85% 0,rgba(46,166,255,.10),transparent 55%),var(--bg);color:var(--txt);font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;padding:18px 14px 48px;min-height:100vh}
+.wrap{max-width:640px;margin:0 auto}
+header{text-align:center;padding:14px 0 4px}
+h1{font-size:26px;letter-spacing:.5px}
+h1 .brand{background:linear-gradient(92deg,#f6821f,#ffb35c);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--dim);font-size:13px;margin-top:6px;line-height:1.7}
+.usage{max-width:640px;margin:14px auto 0;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:13px;color:var(--dim);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.usage b{color:var(--txt)}
+.usage .bar{flex-basis:100%;height:6px;background:var(--panel2);border-radius:99px;overflow:hidden;margin-top:2px}
+.usage .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc2),var(--acc));border-radius:99px;width:0%}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px 16px;margin-top:14px;box-shadow:0 8px 28px rgba(0,0,0,.28)}
+.drop{border:2px dashed var(--line);border-radius:14px;padding:30px 14px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s}
+.drop:hover,.drop.over{border-color:var(--acc);background:rgba(246,130,31,.06)}
+.drop .big{font-size:40px;line-height:1}
+.drop p{margin-top:10px;font-size:15px}
+.drop small{display:block;margin-top:6px;color:var(--dim);font-size:12.5px;line-height:1.7}
+#fileInput{display:none}
+.fileinfo{display:none;margin-top:14px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.9}
+.fileinfo .name{word-break:break-all;font-weight:700}
+.fileinfo .meta{color:var(--dim);font-size:13px}
+.expiry{margin-top:16px}
+.expiry .label{font-size:13px;color:var(--dim);margin-bottom:8px}
+.seg{display:flex;gap:8px}
+.seg.wrap{flex-wrap:wrap}
+.seg.wrap button{flex:1 1 30%}
+.seg button{flex:1;padding:11px 0;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);font-size:14px;cursor:pointer}
+.seg button.on{background:var(--acc);border-color:var(--acc);color:#201304;font-weight:700}
+.btn{display:block;width:100%;margin-top:18px;padding:14px 0;border:0;border-radius:14px;background:var(--acc);color:#201304;font-size:16px;font-weight:700;cursor:pointer}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line);font-weight:400}
+.progress{display:none;margin-top:16px}
+.progress .row{display:flex;justify-content:space-between;font-size:13px;color:var(--dim);margin-bottom:8px}
+.progress .row b{color:var(--txt)}
+.pbar{height:10px;background:var(--panel2);border-radius:99px;overflow:hidden}
+.pbar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc2),var(--acc));width:0%;transition:width .2s}
+.result{display:none;margin-top:16px;background:var(--panel2);border:1px solid var(--ok);border-radius:12px;padding:14px}
+.result h3{font-size:15px;color:var(--ok);margin-bottom:10px}
+.linkrow{display:flex;gap:8px}
+.linkrow input{flex:1;min-width:0;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--txt);font-size:13px}
+.linkrow button{flex:0 0 auto;padding:0 16px;border-radius:10px;border:0;background:var(--acc2);color:#04121f;font-size:14px;font-weight:700;cursor:pointer}
+.result .meta{margin-top:10px;color:var(--dim);font-size:13px;line-height:1.8}
+.error{display:none;margin-top:14px;background:rgba(231,76,60,.12);border:1px solid var(--bad);color:#f5b7b1;border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.7}
+.info{font-size:13.5px;color:var(--dim);line-height:2}
+.info b{color:var(--txt)}
+.info li{margin-left:18px}
+footer{text-align:center;color:var(--dim);font-size:12px;margin-top:22px;line-height:1.9}
+#previewBanner{display:none;background:#3a2b00;border:1px solid var(--warn);color:#ffe08a;border-radius:12px;padding:10px 14px;font-size:13px;line-height:1.7;margin-top:14px;text-align:center}
+@media(max-width:480px){h1{font-size:23px}.card{padding:16px 12px}.drop{padding:24px 10px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="brand">YM 传文件</span></h1>
+    <p class="sub">免费 · 不用注册 · 不用装 App<br>浏览器里直接传，传完给一个下载链接，过期自动删除</p>
+  </header>
+
+  <div id="previewBanner">👀 预览版 — 只看界面和流程，上传是模拟的，不会真的传文件。</div>
+
+  <div class="usage" id="usageBox">
+    <span>站内已用 <b id="usedText">…</b> / 10 GB</span>
+    <span>单文件最大 <b>5 GB</b></span>
+    <div class="bar"><i id="usedBar"></i></div>
+  </div>
+
+  <div class="card">
+    <div class="drop" id="dropZone">
+      <div class="big">📤</div>
+      <p>点这里选择文件</p>
+      <small>也可以把文件直接拖到这里<br>什么类型都能传（安装包、压缩包、视频、文档……）</small>
+    </div>
+    <input type="file" id="fileInput">
+
+    <div class="fileinfo" id="fileInfo">
+      <div class="name" id="fileName"></div>
+      <div class="meta" id="fileMeta"></div>
+    </div>
+
+    <div class="expiry" id="expiryBox" style="display:none">
+      <div class="label">链接有效期（到期自动删除）</div>
+      <div class="seg wrap" id="expirySeg">
+        <button type="button" data-hours="1">1 小时</button>
+        <button type="button" data-hours="6">6 小时</button>
+        <button type="button" data-hours="12">12 小时</button>
+        <button type="button" data-hours="24" class="on">1 天</button>
+        <button type="button" data-hours="72">3 天</button>
+        <button type="button" data-hours="168">7 天</button>
+      </div>
+    </div>
+
+    <div class="expiry" id="dlBox" style="display:none">
+      <div class="label">下载次数（达到次数后链接失效）</div>
+      <div class="seg" id="dlSeg">
+        <button type="button" data-count="" class="on">不限</button>
+        <button type="button" data-count="1">1 次</button>
+        <button type="button" data-count="5">5 次</button>
+        <button type="button" data-count="10">10 次</button>
+      </div>
+    </div>
+
+    <button class="btn" id="uploadBtn" disabled>开始上传</button>
+
+    <div class="progress" id="progressBox">
+      <div class="row"><span id="progText">上传中…</span><b id="progPct">0%</b></div>
+      <div class="pbar"><i id="progBar"></i></div>
+      <div class="row" style="margin-top:8px"><span id="progSpeed"></span><span id="progEta"></span></div>
+    </div>
+
+    <div class="result" id="resultBox">
+      <h3>✅ 上传完成，把链接发给对方就行</h3>
+      <div class="linkrow">
+        <input type="text" id="linkInput" readonly>
+        <button type="button" id="copyBtn">复制链接</button>
+      </div>
+      <div class="meta" id="resultMeta"></div>
+      <button class="btn ghost" id="againBtn" style="margin-top:14px">再传一个</button>
+    </div>
+
+    <div class="error" id="errorBox"></div>
+  </div>
+
+  <div class="card info">
+    <b>用之前先知道：</b>
+    <ul>
+      <li>单个文件最大 <b>5 GB</b>，再大传不了。</li>
+      <li>站内总共只有 <b>10 GB</b> 空间（免费套餐上限），文件多了会提示空间不足，等旧文件过期删掉就有空位了。</li>
+      <li>链接 <b>1 / 6 / 12 小时、1 / 3 / 7 天</b>后自动失效，文件同时删除，不用手动清理。</li>
+      <li>下载次数可以自己选（<b>不限 / 1 次 / 5 次 / 10 次</b>），达到次数后链接失效、文件删除。</li>
+      <li>不用注册、不用填邮箱、对方也不用注册，打开链接就能下载。</li>
+      <li>链接是随机生成的，别人猜不到；但拿到链接的人都能下载，别把链接发给不该发的人。</li>
+      <li>网络断了要重新传（大文件建议网络稳的时候传）。</li>
+    </ul>
+  </div>
+
+  <footer>YM 传文件 · 部署在 Cloudflare 免费套餐上<br>文件存在 R2，过期自动删除</footer>
+</div>
+
+<script>
+(function(){
+'use strict';
+var PREVIEW = true; // 预览版：强制开启模拟上传
+var MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024;
+
+var $ = function(id){ return document.getElementById(id); };
+var dropZone = $('dropZone'), fileInput = $('fileInput'), fileInfo = $('fileInfo'),
+    fileNameEl = $('fileName'), fileMetaEl = $('fileMeta'), expiryBox = $('expiryBox'),
+    expirySeg = $('expirySeg'), dlBox = $('dlBox'), dlSeg = $('dlSeg'),
+    uploadBtn = $('uploadBtn'), progressBox = $('progressBox'),
+    progText = $('progText'), progPct = $('progPct'), progBar = $('progBar'),
+    progSpeed = $('progSpeed'), progEta = $('progEta'), resultBox = $('resultBox'),
+    linkInput = $('linkInput'), copyBtn = $('copyBtn'), resultMeta = $('resultMeta'),
+    againBtn = $('againBtn'), errorBox = $('errorBox'),
+    usedText = $('usedText'), usedBar = $('usedBar');
+
+var file = null, expiresHours = 24, maxDownloads = null, uploading = false;
+
+function fmtSize(b){
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1024*1024*1024) return (b/1024/1024).toFixed(1) + ' MB';
+  return (b/1024/1024/1024).toFixed(2) + ' GB';
+}
+function fmtDate(ts){ var d = new Date(ts*1000); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
+function showError(msg){ errorBox.style.display = 'block'; errorBox.textContent = msg; }
+function hideError(){ errorBox.style.display = 'none'; }
+
+function refreshUsage(){
+  if (PREVIEW){ usedText.textContent = '2.3 GB'; usedBar.style.width = '23%'; return; }
+  fetch('/api/stats').then(function(r){ return r.json(); }).then(function(j){
+    if (j && j.ok){
+      usedText.textContent = fmtSize(j.data.used_bytes);
+      usedBar.style.width = Math.min(100, j.data.used_bytes / j.data.total_cap_bytes * 100) + '%';
+    }
+  }).catch(function(){ usedText.textContent = '未知'; });
+}
+
+function resetPick(){
+  file = null;
+  fileInfo.style.display = 'none';
+  expiryBox.style.display = 'none';
+  dlBox.style.display = 'none';
+  uploadBtn.disabled = true;
+}
+function pickFile(f){
+  if (!f) return;
+  hideError();
+  resultBox.style.display = 'none';
+  progressBox.style.display = 'none';
+  if (f.size < 1){ showError('这个文件是空的，换一个文件再试。'); resetPick(); return; }
+  if (f.size > MAX_FILE_BYTES){ showError('单个文件不能超过 5 GB，这个文件是 ' + fmtSize(f.size) + '。'); resetPick(); return; }
+  file = f;
+  fileNameEl.textContent = f.name;
+  fileMetaEl.textContent = '大小 ' + fmtSize(f.size) + '　类型 ' + (f.type || '未知');
+  fileInfo.style.display = 'block';
+  expiryBox.style.display = 'block';
+  dlBox.style.display = 'block';
+  uploadBtn.disabled = false;
+}
+
+dropZone.addEventListener('click', function(){ if (!uploading) fileInput.click(); });
+fileInput.addEventListener('change', function(){ pickFile(fileInput.files[0]); });
+['dragover','dragenter'].forEach(function(ev){
+  dropZone.addEventListener(ev, function(e){ e.preventDefault(); dropZone.classList.add('over'); });
+});
+['dragleave','drop'].forEach(function(ev){
+  dropZone.addEventListener(ev, function(e){ e.preventDefault(); dropZone.classList.remove('over'); });
+});
+dropZone.addEventListener('drop', function(e){
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) pickFile(e.dataTransfer.files[0]);
+});
+expirySeg.addEventListener('click', function(e){
+  var b = e.target.closest('button'); if (!b) return;
+  expiresHours = parseInt(b.getAttribute('data-hours'), 10);
+  expirySeg.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x === b); });
+});
+dlSeg.addEventListener('click', function(e){
+  var b = e.target.closest('button'); if (!b) return;
+  var c = b.getAttribute('data-count');
+  maxDownloads = c === '' ? null : parseInt(c, 10);
+  dlSeg.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x === b); });
+});
+
+function setProgress(loaded, total, startedAt){
+  var pct = total ? Math.min(100, loaded / total * 100) : 0;
+  progPct.textContent = pct.toFixed(0) + '%';
+  progBar.style.width = pct + '%';
+  progText.textContent = '上传中… ' + fmtSize(loaded) + ' / ' + fmtSize(total);
+  var el = (Date.now() - startedAt) / 1000;
+  if (el > 1 && loaded > 0){
+    var speed = loaded / el;
+    progSpeed.textContent = '速度 ' + fmtSize(speed) + '/秒';
+    var remain = total - loaded;
+    progEta.textContent = remain > 0 ? '还剩约 ' + Math.ceil(remain / speed) + ' 秒' : '';
+  }
+}
+
+function showResult(link, expiresAt, name, size, maxDl){
+  progressBox.style.display = 'none';
+  linkInput.value = link;
+  resultMeta.innerHTML = '文件：' + escapeHtml(name) + '（' + fmtSize(size) + '）<br>链接有效期到：' + fmtDate(expiresAt) + '，到期自动删除<br>' + (maxDl ? '最多可下载 ' + maxDl + ' 次，达到次数后链接失效' : '下载次数不限');
+  resultBox.style.display = 'block';
+  uploadBtn.disabled = true;
+  refreshUsage();
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+}
+
+function uploadReal(){
+  uploading = true;
+  uploadBtn.disabled = true;
+  hideError();
+  progressBox.style.display = 'block';
+  setProgress(0, file.size, Date.now());
+  var mime = file.type || 'application/octet-stream';
+  fetch('/api/upload-init', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: file.name, mime: mime, size: file.size, expires_hours: expiresHours, max_downloads: maxDownloads })
+  }).then(function(r){ return r.json().then(function(j){ return { status: r.status, body: j }; }); }).then(function(res){
+    if (!res.body.ok){
+      throw new Error(res.body.error ? res.body.error.message : '创建上传失败');
+    }
+    var d = res.body.data;
+    var startedAt = Date.now();
+    var xhr = new XMLHttpRequest();
+    xhr.open('PUT', d.upload_url, true);
+    xhr.setRequestHeader('Content-Type', d.upload_headers['Content-Type'] || mime);
+    xhr.upload.onprogress = function(e){
+      if (e.lengthComputable) setProgress(e.loaded, e.total, startedAt);
+    };
+    xhr.onload = function(){
+      if (xhr.status === 200){
+        setProgress(file.size, file.size, startedAt);
+        progText.textContent = '上传完成，正在确认…';
+        fetch('/api/upload-complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: d.id })
+        }).then(function(r){ return r.json(); }).then(function(j){
+          uploading = false;
+          if (j.ok){
+            showResult(j.data.download_url, j.data.expires_at, j.data.name, j.data.size, j.data.max_downloads);
+          } else {
+            throw new Error(j.error ? j.error.message : '确认上传失败');
+          }
+        }).catch(function(err){ uploading = false; showError(err.message || '确认上传失败，请重试。'); uploadBtn.disabled = false; });
+      } else {
+        uploading = false;
+        showError('上传失败（服务器返回 ' + xhr.status + '），请检查网络后重试。');
+        uploadBtn.disabled = false;
+      }
+    };
+    xhr.onerror = function(){
+      uploading = false;
+      showError('上传失败，请检查网络后重试。');
+      uploadBtn.disabled = false;
+    };
+    xhr.send(file);
+  }).catch(function(err){
+    uploading = false;
+    showError(err.message || '创建上传失败，请重试。');
+    uploadBtn.disabled = false;
+  });
+}
+
+function uploadPreview(){
+  uploading = true;
+  uploadBtn.disabled = true;
+  hideError();
+  progressBox.style.display = 'block';
+  var total = file.size, loaded = 0, startedAt = Date.now();
+  var timer = setInterval(function(){
+    loaded = Math.min(total, loaded + total * 0.07 + 1024*1024);
+    setProgress(loaded, total, startedAt);
+    if (loaded >= total){
+      clearInterval(timer);
+      uploading = false;
+      var fakeId = '0123456789abcdef0123456789abcdef';
+      var link = location.origin && location.origin !== 'null' ? location.origin + '/d/' + fakeId : 'https://ym-transfer.pages.dev/d/' + fakeId;
+      showResult(link, Math.floor(Date.now()/1000) + expiresHours*3600, file.name, file.size, maxDownloads);
+    }
+  }, 120);
+}
+
+uploadBtn.addEventListener('click', function(){
+  if (!file || uploading) return;
+  if (PREVIEW) uploadPreview(); else uploadReal();
+});
+copyBtn.addEventListener('click', function(){
+  var done = function(){ copyBtn.textContent = '已复制 ✓'; setTimeout(function(){ copyBtn.textContent = '复制链接'; }, 2000); };
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(linkInput.value).then(done).catch(function(){ fallbackCopy(done); });
+  } else { fallbackCopy(done); }
+});
+function fallbackCopy(done){
+  linkInput.select();
+  try { document.execCommand('copy'); done(); }
+  catch(e){ linkInput.focus(); }
+}
+againBtn.addEventListener('click', function(){
+  file = null; fileInput.value = '';
+  fileInfo.style.display = 'none'; expiryBox.style.display = 'none'; dlBox.style.display = 'none'; resultBox.style.display = 'none'; progressBox.style.display = 'none';
+  hideError(); uploadBtn.disabled = true;
+});
+
+if (PREVIEW){
+  document.getElementById('previewBanner').style.display = 'block';
+  document.title = 'YM 传文件（预览）';
+}
+refreshUsage();
+})();
+</script>
+</body>
+</html>

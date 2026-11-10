@@ -1,0 +1,1 @@
+[{"AllowedHeaders":["Content-Type"],"AllowedMethods":["PUT","GET","HEAD"],"AllowedOrigins":["https://ym-transfer.pages.dev"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3600}]
