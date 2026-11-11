@@ -1,0 +1,28 @@
+# ym-transfer 的 Cloudflare Pages 配置示例（无真值，部署时不用改名提交）
+# 本站现行做法：绑定（D1 / R2）与普通变量全部在 Pages 后台配（见 DEPLOY.md 第 6 步），
+# 仓库里不放 wrangler.toml 真值版——账号 ID、数据库 ID 这类标识不进公开仓库。
+# 本文件只说明构建信息长什么样：Pages 连 Git 时框架预设 None、构建命令留空、
+# 构建输出目录 public，后台建项目时照填即可，不需要这份文件参与。
+# 若你偏要用文件路线：把本文件改名为 wrangler.toml、填上下面的真值再提交；
+# 注意那样后台的绑定/变量编辑会被锁定、改由文件管理，且标识会进你的仓库。
+
+name = "ym-transfer"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "public"
+
+# [vars]
+# R2_S3_ENDPOINT = "https://<你的账号ID>.r2.cloudflarestorage.com"
+# R2_S3_BUCKET = "ym-transfer-files"
+#
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "ym-transfer-db"
+# database_id = "<你的数据库ID>"
+#
+# [[r2_buckets]]
+# binding = "FILES"
+# bucket_name = "ym-transfer-files"
+
+# 密钥（R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / TASK_SECRET）永远不写进任何仓库文件，
+# 由 GitHub Actions 的 deploy 工作流通过 wrangler 加密变量推送到 Pages。
