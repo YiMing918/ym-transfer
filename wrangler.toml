@@ -1,0 +1,20 @@
+# ym-transfer 的 Cloudflare Pages 配置
+# 本文件只放构建信息。绑定（D1 / R2）、变量与密钥一律在 Pages 后台配，不要写进本文件：
+# Pages 一旦在 wrangler.toml 里看到某个字段，就以文件为准、后台同名字段改不动——
+# 把占位 database_id 之类的值写进来，会直接把绑定带到不存在的资源上。
+# 部署步骤见 DEPLOY.md。
+
+name = "ym-transfer"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "public"
+
+# 运行时配置都在 Pages 后台 Settings 里配（清单见 DEPLOY.md 第 6 步）：
+#   绑定：DB（D1 数据库）、FILES（R2 存储桶）
+#   变量：R2_S3_ENDPOINT、R2_S3_BUCKET
+#   加密变量（Secret）：R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / TASK_SECRET
+#   可选变量：IP_SALT（IP 哈希的盐，不配有默认值）
+#
+# 限制口径（单文件 5GB、站内共 10GB）写在代码里，不走配置：
+# functions/api/upload-init.js 与 functions/api/stats.js 的常量、
+# public/index.html 里的 MAX_FILE_BYTES，改限制要三处一起改。
