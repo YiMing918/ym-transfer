@@ -1,0 +1,22 @@
+name: ci
+
+# 每次 push / PR 先跑仓库自带的三套本地测试（smoke + frontend + e2e，零依赖），
+# 红了就在 Actions 页亮出来。此前测试只在本地手动跑，坏代码推上去要等
+# deploy.yml 部署完、线上出问题才发现。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 跑全部测试套件
+        run: npm test
