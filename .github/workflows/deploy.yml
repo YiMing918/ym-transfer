@@ -34,6 +34,8 @@ jobs:
           npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0001_init.sql
           # 0002 加一列 max_downloads：列已存在时会报错，用 || true 忽略（列已存在 = 已迁移过，属正常）
           npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0002_add_max_downloads.sql || echo "0002 可能已执行过（列已存在），继续"
+          # 0003 删冗余索引：DROP INDEX IF EXISTS 本身幂等，可重复跑
+          npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0003_drop_redundant_index.sql
       - name: 推送 Pages 加密变量（Secret 逐个灌入，缺哪个跳哪个）
         # 首次运行时项目还不存在（由下一步的部署创建），本步会失败但不许中断：continue-on-error 放行，
         # 部署建好项目后手动再跑一次本工作流，密钥灌入后随第二次部署生效。
