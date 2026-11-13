@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>YM 传文件 · 免费传文件，不用注册</title>
 <meta name="description" content="YM 传文件：浏览器里直接传文件，不用注册、不用装 App，传完给一个下载链接，过期自动删除。单文件最大 5GB。">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📤</text></svg>">
@@ -186,8 +186,15 @@ function refreshUsage(){
     if (j && j.ok){
       usedText.textContent = fmtSize(j.data.used_bytes);
       usedBar.style.width = Math.min(100, j.data.used_bytes / j.data.total_cap_bytes * 100) + '%';
+      // 单文件上限以后端为准（stats 已返回），前端那份硬编码只作兜底
+      if (j.data.max_file_bytes) MAX_FILE_BYTES = j.data.max_file_bytes;
     }
   }).catch(function(){ usedText.textContent = '未知'; });
+}
+// 接口响应不一定是 JSON（边缘 502 会返回 HTML 页）：解析失败时给人话提示，
+// 别把 "Unexpected token" 这种引擎报错直接甩给用户
+function jsonOrErr(r){
+  return r.json().catch(function(){ throw new Error('服务器返回异常（HTTP ' + r.status + '），请稍后再试'); });
 }
 
 function resetPick(){
@@ -222,6 +229,7 @@ fileInput.addEventListener('change', function(){ pickFile(fileInput.files[0]); }
   dropZone.addEventListener(ev, function(e){ e.preventDefault(); dropZone.classList.remove('over'); });
 });
 dropZone.addEventListener('drop', function(e){
+  if (uploading) return; // 上传中拖入新文件会把进度界面冲乱（后台其实还在传）
   if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) pickFile(e.dataTransfer.files[0]);
 });
 expirySeg.addEventListener('click', function(e){
@@ -253,7 +261,7 @@ function setProgress(loaded, total, startedAt){
 function showResult(link, expiresAt, name, size, maxDl){
   progressBox.style.display = 'none';
   linkInput.value = link;
-  resultMeta.innerHTML = '文件：' + escapeHtml(name) + '（' + fmtSize(size) + '）<br>链接有效期到：' + fmtDate(expiresAt) + '，到期自动删除<br>' + (maxDl ? '最多可下载 ' + maxDl + ' 次，达到次数后链接失效' : '下载次数不限');
+  resultMeta.innerHTML = '文件：' + escapeHtml(name) + '（' + fmtSize(size) + '）<br>链接有效期到：' + fmtDate(expiresAt) + '，到期自动删除<br>' + (maxDl ? '最多可领取下载 ' + maxDl + ' 次（每次领到的直链 1 小时内有效），达到次数后链接失效、文件随后删除' : '下载次数不限');
   resultBox.style.display = 'block';
   uploadBtn.disabled = true;
   refreshUsage();
@@ -273,7 +281,7 @@ function uploadReal(){
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: file.name, mime: mime, size: file.size, expires_hours: expiresHours, max_downloads: maxDownloads })
-  }).then(function(r){ return r.json().then(function(j){ return { status: r.status, body: j }; }); }).then(function(res){
+  }).then(function(r){ return jsonOrErr(r).then(function(j){ return { status: r.status, body: j }; }); }).then(function(res){
     if (!res.body.ok){
       throw new Error(res.body.error ? res.body.error.message : '创建上传失败');
     }
@@ -286,14 +294,14 @@ function uploadReal(){
       if (e.lengthComputable) setProgress(e.loaded, e.total, startedAt);
     };
     xhr.onload = function(){
-      if (xhr.status === 200){
+      if (xhr.status >= 200 && xhr.status < 300){
         setProgress(file.size, file.size, startedAt);
         progText.textContent = '上传完成，正在确认…';
         fetch('/api/upload-complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: d.id })
-        }).then(function(r){ return r.json(); }).then(function(j){
+        }).then(function(r){ return jsonOrErr(r); }).then(function(j){
           uploading = false;
           if (j.ok){
             showResult(j.data.download_url, j.data.expires_at, j.data.name, j.data.size, j.data.max_downloads);

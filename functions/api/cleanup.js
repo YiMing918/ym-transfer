@@ -4,14 +4,27 @@
 
 import { json, fail, nowSec } from '../_lib/http.js';
 import { all, run } from '../_lib/db.js';
+import { PENDING_TTL_SEC } from '../_lib/consts.js';
 
-const PENDING_TTL_SEC = 3600; // pending 超过 1 小时未完成算超时
+// 密钥比较走「先哈希再恒定时间比对」，不用 === 直接比原文（计时侧信道）
+async function secretMatches(given, expected) {
+  if (!expected) return false;
+  const enc = new TextEncoder();
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(given || '')),
+    crypto.subtle.digest('SHA-256', enc.encode(expected)),
+  ]);
+  const av = new Uint8Array(a), bv = new Uint8Array(b);
+  let diff = 0;
+  for (let i = 0; i < av.length; i++) diff |= av[i] ^ bv[i];
+  return diff === 0;
+}
 
 export async function onRequest(context) {
   const { request, env } = context;
   if (request.method !== 'POST') return fail('method_not_allowed', '只支持 POST', 405);
   const secret = request.headers.get('X-Task-Secret') || '';
-  if (!env.TASK_SECRET || secret !== env.TASK_SECRET) {
+  if (!(await secretMatches(secret, env.TASK_SECRET || ''))) {
     return fail('unauthorized', '密钥不对', 401);
   }
   const now = nowSec();

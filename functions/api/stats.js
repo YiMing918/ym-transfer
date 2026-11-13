@@ -3,9 +3,9 @@
 
 import { json, nowSec } from '../_lib/http.js';
 import { first } from '../_lib/db.js';
+import { TOTAL_CAP_BYTES, MAX_FILE_BYTES, PENDING_TTL_SEC } from '../_lib/consts.js';
 
-export const TOTAL_CAP_BYTES = 10 * 1024 * 1024 * 1024; // 10 GiB
-export const MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024;   // 5 GiB
+export { TOTAL_CAP_BYTES, MAX_FILE_BYTES };
 
 export async function onRequest(context) {
   const { env } = context;
@@ -13,7 +13,7 @@ export async function onRequest(context) {
   const row = await first(env, `SELECT COALESCE(SUM(size_bytes),0) AS total, COUNT(*) AS n FROM files
     WHERE (status = 'ready' AND expires_at > ?)
        OR (status = 'pending' AND created_at > ? AND expires_at > ?)`,
-    now, now - 3600, now);
+    now, now - PENDING_TTL_SEC, now);
   return json({
     used_bytes: row ? row.total : 0,
     file_count: row ? row.n : 0,

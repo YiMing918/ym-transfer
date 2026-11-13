@@ -66,6 +66,8 @@ Cloudflare 后台 → Workers 和 Pages → 创建 → Pages → 连接到 Git�
 - 关于 `wrangler.toml`：本仓库**不带**这份文件的真值版（只有 `wrangler.toml.example` 示例，没有任何账号/数据库标识）。绑定与变量一律在后台配（第 6 步）。注意：只要项目里出现带绑定段的 `wrangler.toml`，后台的绑定/变量编辑就会被锁定、改由文件管理，所以别把示例改名提交。
 - 点「保存并部署」——第一次部署会失败或接口报错是正常的（Secret 还没配），先不管，继续第 6 步，配好后重新部署一次。
 
+> **部署路径只走一条（重要）**：本站现行部署是第 8 步的 **deploy.yml 用 wrangler 直推**。项目如果是在这里「连接到 Git」建的，两条路会同时存在——推代码时 Git 集成自动部署一次、deploy.yml 又部署一次，互相覆盖且后到者赢，排障时极易误判。若已连 Git，请到 Pages 项目 → 设置 → 构建和部署里**断开 Git 集成**，只保留 deploy.yml 这一条路（反之只想用 Git 集成的人，则不要配第 8 步的部署 Secrets、删掉 deploy.yml）。
+
 ## 6. 绑定、变量与密钥（关键一步，别漏）
 
 **后台配（本站现行方式）**：进 Pages 项目 → 设置 → 绑定 / 环境变量：
@@ -83,6 +85,9 @@ Cloudflare 后台 → Workers 和 Pages → 创建 → Pages → 连接到 Git�
 | `R2_ACCESS_KEY_ID` | 第 3 步记下的 Access Key ID | **加密变量（Secret）** |
 | `R2_SECRET_ACCESS_KEY` | 第 3 步记下的 Secret Access Key | **加密变量（Secret）** |
 | `TASK_SECRET` | 自己编一个随机串（如 `openssl rand -hex 32` 的结果） | **加密变量（Secret）** |
+| `IP_SALT` | 自己编一个随机串（可选，强烈建议配） | **加密变量（Secret）** |
+
+`IP_SALT` 用于给访客 IP 做哈希加盐（限流计数用）：不配时代码里有一个公开的默认值兜底，功能不受影响，但盐公开等于没盐——拿到哈希的人可以离线反推 IP。配成只有你知道的随机串即可，不需要与任何其他地方一致。
 
 这三枚密钥可以进 Pages 后台「设置 → 环境变量」手动加为加密变量；本站的做法是填进 GitHub Secrets（第 8 步），由 deploy 工作流自动推送到 Pages——改密钥后手动跑一次 deploy 工作流即可同步。`TASK_SECRET` 的值同时要填进 GitHub Secrets，两边必须一样。
 

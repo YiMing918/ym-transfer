@@ -183,7 +183,7 @@ await test('容量上限：站内 9GB 时，传 2GB 拒绝、传 1GB 通过', as
 await test('容量统计：已过期的 ready 不占容量，超时 pending 不占容量', async () => {
   const mock = freshEnv();
   insertFileRow(mock, { id: 'b'.repeat(32), r2Key: 'f/2026/11/bbb', size: 9 * 1024 * 1024 * 1024, status: 'ready', expiresInSec: -10 });
-  insertFileRow(mock, { id: 'c'.repeat(32), r2Key: 'f/2026/11/ccc', size: 9 * 1024 * 1024 * 1024, status: 'pending', createdAgoSec: 7200 });
+  insertFileRow(mock, { id: 'c'.repeat(32), r2Key: 'f/2026/11/ccc', size: 9 * 1024 * 1024 * 1024, status: 'pending', createdAgoSec: 25200 });
   const r = await initFile(mock, { size: 5 * 1024 * 1024 * 1024 });
   eq(r.res.status, 200, '过期与超时 pending 不应占容量');
 });
@@ -274,7 +274,7 @@ await test('已过期 → 404 中文页，且懒清理删掉 R2 对象与记录'
   eq(await mock.env.FILES.head('f/2026/11/eee'), null, 'R2 对象应被删');
   eq(mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind('e'.repeat(32)).first(), null, 'D1 记录应被删');
 });
-await test('下载次数用完 → 404 中文页，且懒清理删掉 R2 对象与记录', async () => {
+await test('下载次数用完 → 404 中文页；不立即删文件，只收紧有效期（已签发直链可下完）', async () => {
   const mock = freshEnv();
   insertFileRow(mock, { id: '9'.repeat(32), r2Key: 'f/2026/11/999', size: 500, status: 'ready', downloads: 5, maxDownloads: 5 });
   await mock.env.FILES.put('f/2026/11/999', Buffer.alloc(500, 1));
@@ -282,8 +282,11 @@ await test('下载次数用完 → 404 中文页，且懒清理删掉 R2 对象�
   eq(r.res.status, 404);
   ok(r.text.includes('下载次数'), '应提示下载次数已用完');
   await mock.drainWaitUntil();
-  eq(await mock.env.FILES.head('f/2026/11/999'), null, 'R2 对象应被删');
-  eq(mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind('9'.repeat(32)).first(), null, 'D1 记录应被删');
+  ok(await mock.env.FILES.head('f/2026/11/999'), 'R2 对象不应立即删（已领直链的人可能还在下载）');
+  const row = mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind('9'.repeat(32)).first();
+  ok(row, 'D1 记录应保留到有效期收紧后由过期清理删除');
+  const now = Math.floor(Date.now() / 1000);
+  ok(row.expires_at <= now + 3600, '有效期应被收紧到 1 小时内');
 });
 await test('下载次数未用完 → 302；不限次数时多次下载都放行', async () => {
   const mock = freshEnv();
@@ -320,7 +323,7 @@ await test('正确密钥：删过期 ready、过期 pending、超时 pending；�
   const mock = freshEnv();
   insertFileRow(mock, { id: '1'.repeat(32), r2Key: 'f/2026/11/111', size: 100, status: 'ready', expiresInSec: -10 });
   insertFileRow(mock, { id: '2'.repeat(32), r2Key: 'f/2026/11/222', size: 100, status: 'pending', expiresInSec: -10 });
-  insertFileRow(mock, { id: '3'.repeat(32), r2Key: 'f/2026/11/333', size: 100, status: 'pending', expiresInSec: 86400, createdAgoSec: 7200 });
+  insertFileRow(mock, { id: '3'.repeat(32), r2Key: 'f/2026/11/333', size: 100, status: 'pending', expiresInSec: 86400, createdAgoSec: 25200 });
   insertFileRow(mock, { id: '4'.repeat(32), r2Key: 'f/2026/11/444', size: 100, status: 'ready', expiresInSec: 86400 });
   insertFileRow(mock, { id: '5'.repeat(32), r2Key: 'f/2026/11/555', size: 100, status: 'pending', expiresInSec: 86400, createdAgoSec: 100 });
   for (const k of ['111', '222', '333', '444', '555']) await mock.env.FILES.put('f/2026/11/' + k, Buffer.alloc(100, 2));

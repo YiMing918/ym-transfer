@@ -24,7 +24,13 @@ export function createMockD1() {
       let params = [];
       const bound = {
         bind(...p) { params = p; return bound; },
-        run() { return stmt.run(...params); },
+        // 返回形状必须与真 D1 一致（{ success, meta: { changes } }）：
+        // 此前直接透传 node:sqlite 的 { changes }，生产代码读 res.meta.changes
+        // 在测试里永远是 undefined → 原子计数分支本地测不到、上线才暴露
+        run() {
+          const r = stmt.run(...params);
+          return { success: true, meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } };
+        },
         first() { return stmt.get(...params) ?? null; },
         all() { return { results: stmt.all(...params) }; },
       };

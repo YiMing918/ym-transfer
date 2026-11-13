@@ -68,24 +68,33 @@ export function newObjectKey() {
 // 签发一个 PUT 预签名 URL：签名里锁死 Content-Type，类型不符上传会被 S3 拒绝
 // expiresSec 最长 7 天；传大文件要留足时间，默认 6 小时
 // nowDate 仅供本地测试固定时间用，生产调用不传
-export async function presignPut(env, key, contentType, expiresSec = 21600, nowDate = new Date()) {
+// contentLength（可选）：传入时一并签进签名头——S3 侧会核对实际上传字节数，
+// 声明大小与实传不符在 PUT 时就被拒，不再等 complete 才发现（v1.0 只签了
+// content-type，声明 1 字节实传 5GB 也能过）
+export async function presignPut(env, key, contentType, expiresSec = 21600, nowDate = new Date(), contentLength = null) {
   const { endpoint, bucket, accessKey, secretKey } = getCreds(env);
   const { amzDate, dateStamp } = amzDates(nowDate);
   const url = objectUrl(endpoint, bucket, key);
   const scope = `${dateStamp}/auto/s3/aws4_request`;
+  const hasLen = contentLength !== null && contentLength !== undefined;
+  const signedHeaders = hasLen ? 'content-length;content-type;host' : 'content-type;host';
   const query = buildQuery({
     'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
     'X-Amz-Credential': `${accessKey}/${scope}`,
     'X-Amz-Date': amzDate,
     'X-Amz-Expires': String(expiresSec),
-    'X-Amz-SignedHeaders': 'content-type;host',
+    'X-Amz-SignedHeaders': signedHeaders,
   });
-  const canonicalHeaders = `content-type:${contentType}\nhost:${url.host}\n`;
+  const canonicalHeaders =
+    (hasLen ? `content-length:${contentLength}\n` : '') +
+    `content-type:${contentType}\nhost:${url.host}\n`;
   const signature = await signRequest({
-    method: 'PUT', url, canonicalQuery: query, signedHeaders: 'content-type;host',
+    method: 'PUT', url, canonicalQuery: query, signedHeaders,
     canonicalHeaders, payloadHash: 'UNSIGNED-PAYLOAD', accessKey, secretKey, amzDate, dateStamp,
   });
-  return { url: `${url.origin}${url.pathname}?${query}&X-Amz-Signature=${signature}`, headers: { 'Content-Type': contentType }, expires_in: expiresSec };
+  const headers = { 'Content-Type': contentType };
+  if (hasLen) headers['Content-Length'] = String(contentLength);
+  return { url: `${url.origin}${url.pathname}?${query}&X-Amz-Signature=${signature}`, headers, expires_in: expiresSec };
 }
 
 // RFC 5987 文件名编码（下载时 Content-Disposition 用）：UTF-8 百分号编码，只留 attr-char

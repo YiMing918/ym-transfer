@@ -4,11 +4,9 @@
 import { json, fail, readJson, nowSec, ipHash, randomToken, HttpError } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
 import { presignPut, newObjectKey } from '../_lib/r2sign.js';
+import { MAX_FILE_BYTES, TOTAL_CAP_BYTES, UPLOAD_URL_TTL_SEC, PENDING_TTL_SEC } from '../_lib/consts.js';
 
-export const MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024;      // 单文件上限 5 GiB
-export const TOTAL_CAP_BYTES = 10 * 1024 * 1024 * 1024;    // 站内总容量上限 10 GiB（免费 R2 上限）
-const UPLOAD_URL_TTL_SEC = 6 * 3600;                       // 上传地址有效 6 小时，覆盖慢速大文件上传
-const PENDING_TTL_SEC = 3600;                              // pending 超过 1 小时未完成算超时（不占容量）
+export { MAX_FILE_BYTES, TOTAL_CAP_BYTES };
 const RATE_LIMIT_PER_HOUR = 10;                            // 同一 IP 每小时最多创建 10 次上传
 
 function cleanFileName(name) {
@@ -18,7 +16,7 @@ function cleanFileName(name) {
   return n;
 }
 
-// 站内已用字节：未过期的 ready + 1 小时内新建的 pending（超时 pending 不占容量，等清理删）
+// 站内已用字节：未过期的 ready + 保留期内新建的 pending（超时 pending 不占容量，等清理删）
 async function usedBytes(env, now) {
   const row = await first(env, `SELECT COALESCE(SUM(size_bytes),0) AS total FROM files
     WHERE (status = 'ready' AND expires_at > ?)
@@ -35,6 +33,9 @@ export async function onRequest(context) {
     body = await readJson(request);
   } catch (e) {
     return fail(e.code || 'bad_request', e.message, e.status || 400);
+  }
+  if (!body || typeof body !== 'object') {
+    return fail('bad_request', '请求体不合法', 400);
   }
   const size = body.size;
   const expiresHours = body.expires_hours;
@@ -78,9 +79,17 @@ export async function onRequest(context) {
   await run(env, `INSERT INTO files (id, r2_key, orig_name, mime, size_bytes, status, expires_at, downloads, max_downloads, created_at)
     VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?)`, id, r2Key, name, mime, size, expiresAt, maxDownloads, now);
 
+  // 容量复查（写入后再算一次）：前面的「先查后写」在并发下会一起过线，
+  // 插入后把自己算进去重查，超了就删行拒绝——把超额收敛到单请求粒度内
+  const usedAfter = await usedBytes(env, now);
+  if (usedAfter > TOTAL_CAP_BYTES) {
+    await run(env, 'DELETE FROM files WHERE id = ?', id);
+    return fail('quota_full', '站内空间不足（总共 10GB），请等旧文件过期删除后再试', 413);
+  }
+
   let signed;
   try {
-    signed = await presignPut(env, r2Key, mime, UPLOAD_URL_TTL_SEC);
+    signed = await presignPut(env, r2Key, mime, UPLOAD_URL_TTL_SEC, new Date(), size);
   } catch (e) {
     // 签发失败：删掉刚建的 pending 行，不占容量
     await run(env, 'DELETE FROM files WHERE id = ?', id);
