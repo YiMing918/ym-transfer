@@ -4,7 +4,7 @@
 
 ![版本](https://img.shields.io/badge/版本-v1.1.2-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![存储](https://img.shields.io/badge/存储-R2%20%2B%20D1-blue) ![许可](https://img.shields.io/badge/许可-MIT-green)
 
-**[打开站点](https://file.ymaym.top) · [下载最新版部署包](https://github.com/YiMing918/ym-transfer/releases/latest) · [博客教程](https://bk.ymaym.top/post/ym-transfer-guide)**
+**[下载最新版部署包](https://github.com/YiMing918/ym-transfer/releases/latest) · [博客教程](https://bk.ymaym.top/post/ym-transfer-guide)**
 
 > 本文档按「零基础也能照着做出来」的标准写：每一步都写清打开哪个页面、点哪个按钮、哪个框填什么。第一次部署请从「新手先看这里」开始按顺序读，不要跳步。仓库里另有一份 `DEPLOY.md`，是同一套流程的简版备忘，内容以本 README 为准。
 
