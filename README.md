@@ -2,7 +2,7 @@
 
 浏览器里直接传文件：不用注册、不用装 App、不用填邮箱。选文件 → 选有效期和下载次数 → 上传 → 拿到一个下载链接发给对方，对方打开就能下；链接到期或次数用完，文件自动删除。全部跑在 Cloudflare 免费额度里，不用买服务器。
 
-![版本](https://img.shields.io/badge/版本-v1.1.3-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![存储](https://img.shields.io/badge/存储-R2%20%2B%20D1-blue) ![许可](https://img.shields.io/badge/许可-MIT-green)
+![版本](https://img.shields.io/badge/版本-v1.1.4-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![存储](https://img.shields.io/badge/存储-R2%20%2B%20D1-blue) ![许可](https://img.shields.io/badge/许可-MIT-green)
 
 **[下载最新版部署包](https://github.com/YiMing918/ym-transfer/releases/latest) · [博客教程](https://bk.ymaym.top/post/ym-transfer-guide)**
 
@@ -60,7 +60,8 @@
 
 | 文件 | 这是什么 | 哪种部署方式用它 |
 |---|---|---|
-| `ym-transfer-deploy-日期.zip` | **部署包**：已经拼好结构的成品包，解压后根目录就是 `index.html` + `functions/` 文件夹，拿来就能传 | 方式二（手机部署包）主角；方式三也能用它代替拼目录那一步 |
+| `ym-transfer-worker-deploy-日期.zip` | **直传专用包**：解压后根目录就是 `_worker.js` + `index.html` 两个文件（后端已合成进单个 `_worker.js`，没有 `functions/` 文件夹），拿来就能传 | 方式二（手机部署包）主角——**方式二只认它** |
+| `ym-transfer-deploy-日期.zip` | **部署包**：仓库结构的成品包（网页在 `public/` 子目录里，另带 `functions/`、`schema/` 等） | 方式三拼目录时能用它代替拼目录那一步。**别拿它走方式二直接上传**：一是它的首页在 `public/` 子目录里，直传找不到首页；二是 CF 控制台拖拽上传不会编译 `functions/` 文件夹——两条都必然翻车（原因见方式二） |
 | `SHA256SUMS.txt` | **校验文件**：里面写着部署包的 SHA-256 指纹，用来确认你下的 zip 没损坏、没被调包 | 下载部署包后核对用（怎么核对见方式二第 2 步） |
 | `Source code (zip)` / `Source code (tar.gz)` | GitHub 自动生成的**仓库源码快照** | ⚠️ **不能直接当部署包传**：它的结构是仓库原样（网页在 `public/` 子目录里），直接上传 Pages 会找不到首页、接口全 404。看代码、方式一、方式三才用它（或直接 git 克隆） |
 
@@ -289,26 +290,27 @@ CORS（一句话：浏览器的一道安检规则，规定「哪个网站的页�
 ### 要用到的东西
 
 - 共同准备的全部成果（桶、库、钥匙——换新 CF 账号迁移时，这些要在新账号里重新建一遍）。
-- Releases 页下载的两个文件：`ym-transfer-deploy-日期.zip`（部署包）和 `SHA256SUMS.txt`（校验文件）。
+- Releases 页下载的两个文件：`ym-transfer-worker-deploy-日期.zip`（带 `-worker-` 的直传专用包）和 `SHA256SUMS.txt`（校验文件）。
 - 手机浏览器（要能打开 Cloudflare 控制台的完整版页面；控制台提示用 App 或桌面版时选继续用浏览器）。
 
 ### 步骤
 
 **第 1 步：下载并解压部署包**
 
-1. 打开 https://github.com/YiMing918/ym-transfer/releases/latest ，在「Assets（附件）」里点 `ym-transfer-deploy-日期.zip` 下载，再点 `SHA256SUMS.txt` 下载。
-2. 用手机文件管理器解压 zip。解压后**根目录**应该直接是：`index.html` 文件 + `functions/` 文件夹（里面是 api、d 等子文件夹）。
-   - ⚠️ **层级千万别错**：要传的是「`index.html` 和 `functions/` 这一层」，不是把 `public/` 文件夹、更不是把整个 zip 或多套一层文件夹传上去。多套一层，Pages 就找不到首页，打开是 404。
+1. 打开 https://github.com/YiMing918/ym-transfer/releases/latest ，在「Assets（附件）」里点 `ym-transfer-worker-deploy-日期.zip` 下载，再点 `SHA256SUMS.txt` 下载。
+2. 用手机文件管理器解压 zip。解压后**根目录**应该直接是两个文件：`_worker.js` + `index.html`。
+   - ⚠️ **下错包是最常见的翻车**：如果你解压出来看到的是 `functions/` 文件夹或 `public/` 文件夹，说明下错成普通部署包了——普通包的首页藏在 `public/` 子目录里、后端在 `functions/` 里，而 CF 控制台拖拽上传**既不会去子目录里找首页、也不会编译 `functions/` 文件夹**，直传必然是首页 404、接口全坏，不是偶发、重试也没用。回去换带 `-worker-` 的直传专用包。
+   - ⚠️ **层级也别错**：要传的是「`_worker.js` 和 `index.html` 这一层」，不是把整个 zip 或多套一层文件夹传上去。多套一层，Pages 就找不到首页，打开是 404。
 
 **第 2 步（可选但建议）：核对校验文件**
 
-`SHA256SUMS.txt` 里写着部署包的 SHA-256 指纹。手机上用任何能算文件 SHA-256 的工具（文件管理器或哈希计算 App）算一下你下的 zip，指纹和文件里写的一致，说明包完整、没下坏。用电脑的同学：`sha256sum ym-transfer-deploy-日期.zip`（Mac 是 `shasum -a 256`）。
+`SHA256SUMS.txt` 里写着部署包的 SHA-256 指纹。手机上用任何能算文件 SHA-256 的工具（文件管理器或哈希计算 App）算一下你下的 zip，指纹和文件里写的一致，说明包完整、没下坏。用电脑的同学：`sha256sum ym-transfer-worker-deploy-日期.zip`（Mac 是 `shasum -a 256`）。
 
 **第 3 步：在 Cloudflare 建 Pages 项目并上传**
 
 1. 手机浏览器打开 https://dash.cloudflare.com →「Workers 和 Pages」→「创建」→「Pages」→ 选「上传资产（Upload assets）」。
 2. 项目名填 `ym-transfer`（或你喜欢的名字，它决定 `项目名.pages.dev` 这个地址），点创建。
-3. 把第 1 步解压出的**那一层全部内容**上传（`index.html` + `functions/` 文件夹，按控制台提示拖放或逐个选文件；文件夹要整体传，不能只传里面的文件丢掉文件夹结构）。
+3. 把第 1 步解压出的**那一层全部内容**上传（`_worker.js` + `index.html` 两个文件，按控制台提示拖放或逐个选文件）。
 4. 点「部署（Deploy）」。
 
 做到这里你应该看到：部署完成，给你一个 `项目名.pages.dev` 地址，打开能看到中文首页（先别试上传，绑定还没配）。
@@ -331,7 +333,7 @@ CORS（一句话：浏览器的一道安检规则，规定「哪个网站的页�
 
 ### 常见问题
 
-- **打开站点是 404 / 空白**：99% 是上传层级错了（多套了一层文件夹）。重新上传，记住传的是「解压后第一层的内容」。
+- **打开站点是 404 / 空白**：先查是不是**下错了包**——下成不带 `-worker-` 的普通包时，它的首页在 `public/` 子目录里，直传必然 404，换直传专用包重传；包没错再查上传层级（多套了一层文件夹），重新上传，记住传的是「解压后第一层的内容」。
 - **首页能开、上传失败**：先查 CORS 名单里有没有你的真实地址，再查第 4 步的密钥有没有漏填 `R2_SECRET_ACCESS_KEY`。
 - **重新上传新包后要不要重配绑定**：不用。绑定、变量、密钥存在项目设置里，重新部署代码不会清掉它们；只有换新 CF 账号才要重配。
 
@@ -740,6 +742,7 @@ ym-transfer/
 
 ## 版本历史
 
+- **v1.1.4（2026-11-18）**：新增**直传专用包** `ym-transfer-worker-deploy-日期.zip`：把 `functions/` 的 5 个处理函数合成单个 `_worker.js`（合成入口 `build/worker-entry.js`，原函数源码一字未改），`public/` 的首页摊平到包根目录，方式二（手机部署包上传）改用这个包。原因说清：CF 控制台拖拽上传**不会编译 `functions/` 文件夹**（官方文档明示），且普通部署包的首页在 `public/` 子目录里——旧版方式二让用户直传普通包，等于必然首页 404、接口全坏，本版一并改对（下载表旧口径「普通包解压后根目录就是 index.html」与包的真实结构对不上，也一并纠正）。合成包与原 functions 版做过本地逐条对照（22 条用例全一致，含真传文件→签发下载→302 直链全程），自带测试 54 项全过不回归。原部署包与方式一/三不变。
 - **v1.1.3（2026-11-18）**：对抗复读 C 部分一轮修复——限次下载不再被预览/扫描类 UA 伪装绕过（任何 UA 的 GET 都先原子占位计数再发链，只豁免 HEAD；不限次文件不再逐次写下载计数，省 D1 写额度）；上传限流改原子自增拿计数、超限回滚，不再先查后加被并发一起过线；pending 空声明占额封顶为总盘 1/3，刷空声明堵不死全站容量；上传完成确认的有效期位移封顶为上传窗口 6 小时，拖很久才确认不再白拿超长有效期（窗口内慢传仍拿满时长）；mime 先清控制字符再校验 token/token 形态，不合法回 400，签名侧再兜底清洗；package.json 版本号与实际对齐（新增定向测试 scripts/test-c-fixes.mjs）。
 - **v1.1.2（2026-11-18）**：修复上传完成确认的有效期起算顺序——先按已耗时间后移到期时间再判过期，慢传大文件（上传耗时超过所选有效期）不再传完被误判过期拿不到链接；位移后仍过期的异常行当场删对象 + 删记录，不再等定时清理（外部审计核验后修复，新增定向测试 scripts/test-upload-complete-expiry.mjs）。
 - **v1.1.1（2026-11-17）**：部署迁移 0002 不再无条件吞失败——只有「列已存在」（已迁移过）才放行，其他迁移失败直接让部署红灯报错，避免迁移没跑成却照常上线（外部审计核验后修复）。
