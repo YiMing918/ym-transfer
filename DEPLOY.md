@@ -28,10 +28,10 @@ Cloudflare 后台 → D1 SQL 数据库 → 创建数据库：
 - 名称：`ym-transfer-db`
 - 记下数据库 ID（后面要用）。
 
-建表（二选一，两个迁移文件都要跑，先 0001 再 0002）：
+建表（二选一，三个迁移文件都要跑，先 0001 再 0002 再 0003）：
 
-- 方法一（面板）：进数据库 → 控制台 → 先粘贴 `schema/0001_init.sql` 全文执行，再粘贴 `schema/0002_add_max_downloads.sql` 全文执行。
-- 方法二（命令行）：`npx wrangler d1 execute ym-transfer-db --remote --file=schema/0001_init.sql`，再跑一次 `--file=schema/0002_add_max_downloads.sql`。
+- 方法一（面板）：进数据库 → 控制台 → 先粘贴 `schema/0001_init.sql` 全文执行，再粘贴 `schema/0002_add_max_downloads.sql` 全文执行，再粘贴 `schema/0003_drop_redundant_index.sql` 全文执行。
+- 方法二（命令行）：`npx wrangler d1 execute ym-transfer-db --remote --file=schema/0001_init.sql`，再跑一次 `--file=schema/0002_add_max_downloads.sql`，最后一遍 `--file=schema/0003_drop_redundant_index.sql`。
 - 表结构用 `IF NOT EXISTS`，重复执行没事。**0002 是下载次数上限那列（max_downloads），不跑它，选了下载次数的上传会报错。**
 
 ## 3. 建 R2 的 S3 API 令牌（签发预签名 URL 用）

@@ -61,7 +61,7 @@
 | 文件 | 这是什么 | 哪种部署方式用它 |
 |---|---|---|
 | `ym-transfer-deploy-日期.zip` | **部署包**：已经拼好结构的成品包，解压后根目录就是 `index.html` + `functions/` 文件夹，拿来就能传 | 方式二（手机部署包）主角；方式三也能用它代替拼目录那一步 |
-| `ym-transfer-SHA256SUMS.txt` | **校验文件**：里面写着部署包的 SHA-256 指纹，用来确认你下的 zip 没损坏、没被调包 | 下载部署包后核对用（怎么核对见方式二第 2 步） |
+| `SHA256SUMS.txt` | **校验文件**：里面写着部署包的 SHA-256 指纹，用来确认你下的 zip 没损坏、没被调包 | 下载部署包后核对用（怎么核对见方式二第 2 步） |
 | `Source code (zip)` / `Source code (tar.gz)` | GitHub 自动生成的**仓库源码快照** | ⚠️ **不能直接当部署包传**：它的结构是仓库原样（网页在 `public/` 子目录里），直接上传 Pages 会找不到首页、接口全 404。看代码、方式一、方式三才用它（或直接 git 克隆） |
 
 ## 新手先看这里
@@ -289,14 +289,14 @@ CORS（一句话：浏览器的一道安检规则，规定「哪个网站的页�
 ### 要用到的东西
 
 - 共同准备的全部成果（桶、库、钥匙——换新 CF 账号迁移时，这些要在新账号里重新建一遍）。
-- Releases 页下载的两个文件：`ym-transfer-deploy-日期.zip`（部署包）和 `ym-transfer-SHA256SUMS.txt`（校验文件）。
+- Releases 页下载的两个文件：`ym-transfer-deploy-日期.zip`（部署包）和 `SHA256SUMS.txt`（校验文件）。
 - 手机浏览器（要能打开 Cloudflare 控制台的完整版页面；控制台提示用 App 或桌面版时选继续用浏览器）。
 
 ### 步骤
 
 **第 1 步：下载并解压部署包**
 
-1. 打开 https://github.com/YiMing918/ym-transfer/releases/latest ，在「Assets（附件）」里点 `ym-transfer-deploy-日期.zip` 下载，再点 `ym-transfer-SHA256SUMS.txt` 下载。
+1. 打开 https://github.com/YiMing918/ym-transfer/releases/latest ，在「Assets（附件）」里点 `ym-transfer-deploy-日期.zip` 下载，再点 `SHA256SUMS.txt` 下载。
 2. 用手机文件管理器解压 zip。解压后**根目录**应该直接是：`index.html` 文件 + `functions/` 文件夹（里面是 api、d 等子文件夹）。
    - ⚠️ **层级千万别错**：要传的是「`index.html` 和 `functions/` 这一层」，不是把 `public/` 文件夹、更不是把整个 zip 或多套一层文件夹传上去。多套一层，Pages 就找不到首页，打开是 404。
 
