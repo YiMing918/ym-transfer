@@ -249,7 +249,7 @@ await test('大小不一致 → 400 size_mismatch', async () => {
 });
 
 console.log('— 下载 /d/:id —');
-await test('就绪且未过期 → 302 到预签名 GET，带原文件名，下载计数 +1', async () => {
+await test('就绪且未过期 → 302 到预签名 GET，带原文件名；不限次文件不写下载计数（C-35）', async () => {
   const mock = freshEnv();
   insertFileRow(mock, { id: 'd'.repeat(32), r2Key: 'f/2026/11/ddd', name: '合同（最终版）.pdf', mime: 'application/pdf', size: 500, status: 'ready' });
   await mock.env.FILES.put('f/2026/11/ddd', Buffer.alloc(500, 1));
@@ -261,7 +261,7 @@ await test('就绪且未过期 → 302 到预签名 GET，带原文件名，下�
   ok(disp && disp.includes('UTF-8'), '应带原文件名下载');
   await mock.drainWaitUntil();
   const row = mock.env.DB.prepare('SELECT downloads FROM files WHERE id = ?').bind('d'.repeat(32)).first();
-  eq(row.downloads, 1, '下载计数应 +1');
+  eq(row.downloads, 0, '不限次文件不再逐次写计数，downloads 应保持 0（C-35；限次计数见 test-c-fixes.mjs）');
 });
 await test('已过期 → 404 中文页，且懒清理删掉 R2 对象与记录', async () => {
   const mock = freshEnv();

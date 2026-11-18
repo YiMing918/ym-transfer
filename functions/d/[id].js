@@ -10,9 +10,6 @@ import { first, run } from '../_lib/db.js';
 import { presignGet } from '../_lib/r2sign.js';
 import { PRESIGN_GET_TTL_SEC } from '../_lib/consts.js';
 
-// 链接预览 / 扫描类 UA：它们不会真正下载文件，不该消耗下载次数
-const PREVIEW_UA_RE = /(bot|crawler|spider|preview|scanner|facebookexternalhit|telegrambot|whatsapp|slackbot|discordbot|twitterbot|headless)/i;
-
 function gonePage(msg) {
   const safe = esc(msg);
   return new Response(`<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>文件已失效 - YM 传文件</title><style>body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:#0b1220;color:#dbe6f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;text-align:center}h1{font-size:20px}p{color:#8498b3;font-size:14px;line-height:1.8}a{color:#2ea6ff}</style></head><body><div><h1>😕 ${safe}</h1><p>链接不存在、还没传完，或者已经过期被删除了。<br><a href="/">回首页传一个新文件</a></p></div></body></html>`, {
@@ -59,28 +56,25 @@ export async function onRequest(context) {
   } catch {
     return new Response('下载地址签发失败，请稍后再试', { status: 500 });
   }
-  // HEAD 探测与链接预览/扫描 UA 不计次：它们不真正下载文件，此前会把
-  // 「最多下载 1 次」的名额被聊天软件的预览抓取直接耗掉
-  const ua = request.headers.get('user-agent') || '';
-  const noCount = request.method === 'HEAD' || PREVIEW_UA_RE.test(ua);
-  if (row.max_downloads !== null) {
-    if (!noCount) {
-      // 有次数上限：先原子占位（条件更新），抢到才放行，并发打开也不会超发。
-      // 计数失败（数据库异常/结果读不到）时关门返回 503，不再 fail-open
-      // 放行——否则计数形同虚设（v1.0 的回落逻辑会无条件 +1 后照样发链）
-      let changed = null;
-      try {
-        const res = await run(env, 'UPDATE files SET downloads = downloads + 1 WHERE id = ? AND downloads < ?', id, row.max_downloads);
-        changed = res && res.meta ? res.meta.changes : null;
-      } catch { changed = null; }
-      if (changed === 0) return gonePage('这个链接的下载次数已用完');
-      if (changed === null) {
-        return new Response('服务暂时不可用（计数失败），请稍后再试', { status: 503, headers: { 'Cache-Control': 'no-store' } });
-      }
+  // 计次口径（C-1/C-35 修复）：只有 HEAD 探测不计次；其余任何 UA 的 GET
+  // 都必须先原子占位计数再发链——此前带 bot/preview/scanner 等字样的 UA
+  // 免计数却照发直链，限次链接换个 UA 就能无限下，限次形同虚设。聊天
+  // 软件的预览抓取从此与普通 GET 同等对待（计数后发链），不再免计数。
+  // 不限次文件不再逐次写计数：每次打开都写一笔 D1 纯属浪费写额度，
+  // downloads 对不限次文件没有展示/统计用途（见 C-35）。
+  if (row.max_downloads !== null && request.method !== 'HEAD') {
+    // 有次数上限：先原子占位（条件更新），抢到才放行，并发打开也不会超发。
+    // 计数失败（数据库异常/结果读不到）时关门返回 503，不再 fail-open
+    // 放行——否则计数形同虚设（v1.0 的回落逻辑会无条件 +1 后照样发链）
+    let changed = null;
+    try {
+      const res = await run(env, 'UPDATE files SET downloads = downloads + 1 WHERE id = ? AND downloads < ?', id, row.max_downloads);
+      changed = res && res.meta ? res.meta.changes : null;
+    } catch { changed = null; }
+    if (changed === 0) return gonePage('这个链接的下载次数已用完');
+    if (changed === null) {
+      return new Response('服务暂时不可用（计数失败），请稍后再试', { status: 503, headers: { 'Cache-Control': 'no-store' } });
     }
-  } else {
-    // 无上限：计数不阻塞跳转
-    waitUntil(run(env, 'UPDATE files SET downloads = downloads + 1 WHERE id = ?', id).catch(() => {}));
   }
   return Response.redirect(signed.url, 302);
 }

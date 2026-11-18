@@ -71,7 +71,16 @@ export function newObjectKey() {
 // contentLength（可选）：传入时一并签进签名头——S3 侧会核对实际上传字节数，
 // 声明大小与实传不符在 PUT 时就被拒，不再等 complete 才发现（v1.0 只签了
 // content-type，声明 1 字节实传 5GB 也能过）
+// 进签名串/响应头之前清控制字符（C-42 第二道防线）：contentType 会原样
+// 拼进规范请求串与 Content-Type 头，CRLF 等控制字符能污染签名串结构。
+// upload-init 已做 token/token 形态校验，这里再兜底清洗一遍。
+function cleanContentType(contentType) {
+  const cleaned = String(contentType ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  return cleaned || 'application/octet-stream';
+}
+
 export async function presignPut(env, key, contentType, expiresSec = 21600, nowDate = new Date(), contentLength = null) {
+  contentType = cleanContentType(contentType);
   const { endpoint, bucket, accessKey, secretKey } = getCreds(env);
   const { amzDate, dateStamp } = amzDates(nowDate);
   const url = objectUrl(endpoint, bucket, key);
@@ -119,7 +128,7 @@ export async function presignGet(env, key, { contentType, filename, expiresSec =
     'X-Amz-SignedHeaders': 'host',
   };
   if (filename) params['response-content-disposition'] = `attachment;filename*=UTF-8''${rfc5987(filename)}`;
-  if (contentType) params['response-content-type'] = contentType;
+  if (contentType) params['response-content-type'] = cleanContentType(contentType);
   const query = buildQuery(params);
   const canonicalHeaders = `host:${url.host}\n`;
   const signature = await signRequest({

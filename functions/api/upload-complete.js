@@ -4,6 +4,7 @@
 
 import { json, fail, readJson, nowSec } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
+import { UPLOAD_URL_TTL_SEC } from '../_lib/consts.js';
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -34,7 +35,12 @@ export async function onRequest(context) {
   // 进去，慢传大文件选 1 小时有效期会传完即过期。必须先按已耗时间整体
   // 后移再判过期——先判后移的话慢传请求在判过期那一步就被打回，后移
   // 逻辑永远执行不到（v1.1.1 及以前的 bug）。
-  const shift = Math.max(0, now - row.created_at);
+  // 位移封顶（C-34）：位移量最多是实际上传窗口（预签名 PUT 有效期
+  // UPLOAD_URL_TTL_SEC，6 小时）——文件最晚在窗口内传完，complete 再晚
+  // 调用也不该把到期时间无限往后推（旧写法拖 10 天才 complete 能白拿
+  // 10 天 + 满时长）。封顶后 newExpiresAt <= created_at + 上传窗口 +
+  // 用户选定时长；窗口内（6 小时）传完的慢传不受影响，仍拿满时长。
+  const shift = Math.min(Math.max(0, now - row.created_at), UPLOAD_URL_TTL_SEC);
   const newExpiresAt = row.expires_at + shift;
   if (newExpiresAt <= now) {
     // 位移后仍过期（异常行）：当场删对象 + 删记录，不等 cleanup 兜底
