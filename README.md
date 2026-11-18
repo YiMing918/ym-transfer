@@ -1,13 +1,10 @@
 # YM 传文件（ym-transfer）
 
-![版本](https://img.shields.io/badge/版本-v1.1.1-blue)
-![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange)
-![存储](https://img.shields.io/badge/存储-R2%20%2B%20D1-blue)
-![许可](https://img.shields.io/badge/许可-MIT-green)
-
 浏览器里直接传文件：不用注册、不用装 App、不用填邮箱。选文件 → 选有效期和下载次数 → 上传 → 拿到一个下载链接发给对方，对方打开就能下；链接到期或次数用完，文件自动删除。全部跑在 Cloudflare 免费额度里，不用买服务器。
 
-**直达链接**：🌐 打开站点 https://file.ymaym.top · ⬇️ 下载最新版部署包 https://github.com/YiMing918/ym-transfer/releases/latest · 📖 博客教程 https://bk.ymaym.top/post/ym-transfer-guide
+![版本](https://img.shields.io/badge/版本-v1.1.1-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![存储](https://img.shields.io/badge/存储-R2%20%2B%20D1-blue) ![许可](https://img.shields.io/badge/许可-MIT-green)
+
+**[打开站点](https://file.ymaym.top) · [下载最新版部署包](https://github.com/YiMing918/ym-transfer/releases/latest) · [博客教程](https://bk.ymaym.top/post/ym-transfer-guide)**
 
 > 本文档按「零基础也能照着做出来」的标准写：每一步都写清打开哪个页面、点哪个按钮、哪个框填什么。第一次部署请从「新手先看这里」开始按顺序读，不要跳步。仓库里另有一份 `DEPLOY.md`，是同一套流程的简版备忘，内容以本 README 为准。
 
