@@ -1,10 +1,13 @@
 # YM 传文件（ym-transfer）
 
+![版本](https://img.shields.io/badge/版本-v1.1.2-blue)
+![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange)
+![存储](https://img.shields.io/badge/存储-R2%20%2B%20D1-blue)
+![许可](https://img.shields.io/badge/许可-MIT-green)
+
 浏览器里直接传文件：不用注册、不用装 App、不用填邮箱。选文件 → 选有效期和下载次数 → 上传 → 拿到一个下载链接发给对方，对方打开就能下；链接到期或次数用完，文件自动删除。全部跑在 Cloudflare 免费额度里，不用买服务器。
 
-![版本](https://img.shields.io/badge/版本-v1.1.1-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![存储](https://img.shields.io/badge/存储-R2%20%2B%20D1-blue) ![许可](https://img.shields.io/badge/许可-MIT-green)
-
-**[打开站点](https://file.ymaym.top) · [下载最新版部署包](https://github.com/YiMing918/ym-transfer/releases/latest) · [博客教程](https://bk.ymaym.top/post/ym-transfer-guide)**
+**直达链接**：🌐 打开站点 https://file.ymaym.top · ⬇️ 下载最新版部署包 https://github.com/YiMing918/ym-transfer/releases/latest · 📖 博客教程 https://bk.ymaym.top/post/ym-transfer-guide
 
 > 本文档按「零基础也能照着做出来」的标准写：每一步都写清打开哪个页面、点哪个按钮、哪个框填什么。第一次部署请从「新手先看这里」开始按顺序读，不要跳步。仓库里另有一份 `DEPLOY.md`，是同一套流程的简版备忘，内容以本 README 为准。
 
@@ -740,6 +743,7 @@ ym-transfer/
 
 ## 版本历史
 
+- **v1.1.2（2026-11-18）**：修复上传完成确认的有效期起算顺序——先按已耗时间后移到期时间再判过期，慢传大文件（上传耗时超过所选有效期）不再传完被误判过期拿不到链接；位移后仍过期的异常行当场删对象 + 删记录，不再等定时清理（外部审计核验后修复，新增定向测试 scripts/test-upload-complete-expiry.mjs）。
 - **v1.1.1（2026-11-17）**：部署迁移 0002 不再无条件吞失败——只有「列已存在」（已迁移过）才放行，其他迁移失败直接让部署红灯报错，避免迁移没跑成却照常上线（外部审计核验后修复）。
 - **文档增补（2026-11-14，纯文档、不升版本）**：新增「出事了怎么办」整节——R2 桶 / D1 / 钥匙 / CORS / 清理任务 / Pages 项目 / `TASK_SECRET` / `IP_SALT` / 域名 / GitHub 仓库，每样写全出事情形、后果、能不能重建、重建步骤和影响范围；另补「总共要花多少钱」「安全提醒」「手机能干哪些、哪些必须电脑」「术语速查表」四节。
 - **文档升级（2026-11-14，纯文档、不升版本）**：README 按全站统一的「新手向全套运维文档」规格重写——部署三种方式逐一手把手（要用到的东西、点位步骤、自测、常见问题、方式对比与优劣）、每样凭据按「是什么/去哪建/填到哪/干什么用/保存与丢失」写全、补齐先选下载文件、新手准备清单、探活、保活、自动任务表与目录结构；原 DEPLOY.md 的完整步骤并入本文。

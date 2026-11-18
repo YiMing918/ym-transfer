@@ -29,7 +29,19 @@ export async function onRequest(context) {
     return json({ id, download_url: downloadUrl, expires_at: row.expires_at, max_downloads: row.max_downloads, name: row.orig_name, size: row.size_bytes });
   }
   if (row.status !== 'pending') return fail('bad_status', '这个上传已失效', 410);
-  if (row.expires_at <= now) return fail('expired', '这个上传已过期', 410);
+
+  // 有效期从「上传完成」起算：init 时写下的 expires_at 把上传耗时也算了
+  // 进去，慢传大文件选 1 小时有效期会传完即过期。必须先按已耗时间整体
+  // 后移再判过期——先判后移的话慢传请求在判过期那一步就被打回，后移
+  // 逻辑永远执行不到（v1.1.1 及以前的 bug）。
+  const shift = Math.max(0, now - row.created_at);
+  const newExpiresAt = row.expires_at + shift;
+  if (newExpiresAt <= now) {
+    // 位移后仍过期（异常行）：当场删对象 + 删记录，不等 cleanup 兜底
+    try { await env.FILES.delete(row.r2_key); } catch { /* 删除失败由 cleanup 兜底 */ }
+    try { await run(env, 'DELETE FROM files WHERE id = ?', id); } catch { /* 同上 */ }
+    return fail('expired', '这个上传已过期', 410);
+  }
 
   let head = null;
   try { head = await env.FILES.head(row.r2_key); } catch { head = null; }
@@ -41,10 +53,6 @@ export async function onRequest(context) {
     return fail('size_mismatch', `文件大小不一致（应为 ${row.size_bytes} 字节，实际 ${head.size} 字节），请重新上传`, 400);
   }
 
-  // 有效期从「上传完成」起算：init 时写下的 expires_at 把上传耗时也算了
-  // 进去，慢传大文件选 1 小时有效期会传完即过期。按已耗时间整体后移。
-  const shift = Math.max(0, now - row.created_at);
-  const newExpiresAt = row.expires_at + shift;
   await run(env, "UPDATE files SET status = 'ready', expires_at = ? WHERE id = ? AND status = 'pending'", newExpiresAt, id);
   return json({ id, download_url: downloadUrl, expires_at: newExpiresAt, max_downloads: row.max_downloads, name: row.orig_name, size: row.size_bytes });
 }
