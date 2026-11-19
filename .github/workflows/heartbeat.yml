@@ -1,0 +1,24 @@
+name: heartbeat
+
+on:
+  schedule:
+    - cron: '23 3 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  beat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 留一次活动记录（防定时任务被平台停用）
+        run: |
+          DATE=$(TZ=Asia/Shanghai date +%F)
+          echo "last heartbeat: $DATE" > .github/heartbeat.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/heartbeat.txt
+          git commit -m "chore: 月度心跳 $DATE [skip ci]"
+          git push
