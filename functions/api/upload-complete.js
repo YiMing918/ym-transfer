@@ -2,7 +2,7 @@
 // 后端用 R2 HEAD 校验对象确实存在且大小与声明一致，才把状态从 pending 改为 ready。
 // 幂等：已经是 ready 的重复调用直接返回成功。
 
-import { json, fail, readJson, nowSec, hitRateLimit } from '../_lib/http.js';
+import { json, fail, readJson, nowSec, hitRateLimit, tokenHashMatches } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
 import { UPLOAD_URL_TTL_SEC } from '../_lib/consts.js';
 
@@ -30,6 +30,17 @@ export async function onRequest(context) {
 
   const row = await first(env, 'SELECT * FROM files WHERE id = ?', id);
   if (!row) return fail('not_found', '找不到这个上传', 404);
+  // 所有权校验（M1，与 H4 删除令牌同根）：建单时发了删除令牌的文件
+  // （delete_token_hash 非空），确认必须带对令牌才放行——否则任何人知道
+  // 链接 ID 就能替别人确认、挪动到期时间、甚至触发大小不符删对象。
+  // 老文件该列为空（含迁移 0004 没跑时整列不存在）按原规矩不验，正在
+  // 传的老上传不会被这次升级打断。
+  if (row.delete_token_hash) {
+    const given = typeof body.delete_token === 'string' ? body.delete_token : '';
+    if (!(await tokenHashMatches(given, row.delete_token_hash))) {
+      return fail('forbidden', '删除令牌不对，无法确认这个上传', 403);
+    }
+  }
   const now = nowSec();
   const base = new URL(request.url);
   const downloadUrl = `${base.origin}/d/${id}`;

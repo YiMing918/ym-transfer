@@ -1,5 +1,5 @@
 // d/[id].js — 下载入口：/d/<32 位链接 ID>
-// 查元数据 → 未过期且已就绪 → 302 跳转到 R2 预签名 GET（最长 1 小时、且不超过
+// 查元数据 → 未过期且已就绪 → 302 跳转到 R2 预签名 GET（最长 5 分钟、且不超过
 // 分享剩余有效期，下载文件名是原文件名）。注意口径：次数限制的是「经本入口
 // 领取直链的次数」；直链在有效期内可重复下载，这是预签名直链的固有形态。
 // 浏览器直接从 R2 下载，文件字节不经过 Worker。
@@ -67,8 +67,8 @@ export async function onRequest(context) {
 
   let signed;
   try {
-    // 直链有效期不超过分享的剩余有效期（此前固定 1 小时，文件只剩
-    // 5 分钟到期时直链还能再活 55 分钟）
+    // 直链有效期不超过分享的剩余有效期（上限 PRESIGN_GET_TTL_SEC=5 分钟，
+    // 文件只剩 2 分钟到期时直链就只给 2 分钟，不会比分享本身活得久）
     const ttl = Math.max(1, Math.min(PRESIGN_GET_TTL_SEC, row.expires_at - now));
     signed = await presignGet(env, row.r2_key, { contentType: row.mime, filename: row.orig_name, expiresSec: ttl });
   } catch {

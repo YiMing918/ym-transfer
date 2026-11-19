@@ -1,7 +1,7 @@
 // api/upload-init.js — 创建上传：校验大小/有效期 → 查站内容量 → 限流 → 写元数据 → 签发 PUT 预签名 URL
 // 文件字节不经过本接口，浏览器拿 URL 直接 PUT 到 R2（单次 PUT 上限 5GB）。
 
-import { json, fail, readJson, nowSec, ipHash, randomToken, HttpError } from '../_lib/http.js';
+import { json, fail, readJson, nowSec, ipHash, randomToken, sha256Hex, HttpError } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
 import { presignPut, newObjectKey } from '../_lib/r2sign.js';
 import { MAX_FILE_BYTES, TOTAL_CAP_BYTES, UPLOAD_URL_TTL_SEC, PENDING_TTL_SEC, PENDING_CAP_BYTES } from '../_lib/consts.js';
@@ -116,8 +116,23 @@ export async function onRequest(context) {
   const r2Key = newObjectKey();
   const expiresAt = now + expiresHours * 3600;
 
-  await run(env, `INSERT INTO files (id, r2_key, orig_name, mime, size_bytes, status, expires_at, downloads, max_downloads, created_at)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?)`, id, r2Key, name, mime, size, expiresAt, maxDownloads, now);
+  // 删除令牌（H4/M1）：建单时生成，明文只在这一次响应里给上传者，库里
+  // 只存 SHA-256 哈希。凭它能提前删文件、complete 确认也要验它（所有权）。
+  // 迁移 0004 没跑的库没有 delete_token_hash 列：带列 INSERT 会报缺列，
+  // 退回不带列的老写法、这次不发令牌——上传/下载一切照旧，绝不让没迁移
+  // 的库传不了文件（与 ym-mail email_verified 列同款兜底）。
+  const deleteToken = randomToken(16);
+  const deleteTokenHash = await sha256Hex(deleteToken);
+  let tokenIssued = true;
+  try {
+    await run(env, `INSERT INTO files (id, r2_key, orig_name, mime, size_bytes, status, expires_at, downloads, max_downloads, created_at, delete_token_hash)
+      VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?, ?)`, id, r2Key, name, mime, size, expiresAt, maxDownloads, now, deleteTokenHash);
+  } catch (e) {
+    if (!/no such column|has no column/i.test(String((e && e.message) || e))) throw e;
+    tokenIssued = false;
+    await run(env, `INSERT INTO files (id, r2_key, orig_name, mime, size_bytes, status, expires_at, downloads, max_downloads, created_at)
+      VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?)`, id, r2Key, name, mime, size, expiresAt, maxDownloads, now);
+  }
 
   // 容量复查（写入后再算一次）：前面的「先查后写」在并发下会一起过线，
   // 插入后把自己算进去重查，超了就删行拒绝——把超额收敛到单请求粒度内
@@ -145,6 +160,7 @@ export async function onRequest(context) {
     upload_headers: signed.headers,
     upload_expires_in: signed.expires_in,
     download_url: `${base.origin}/d/${id}`,
+    delete_token: tokenIssued ? deleteToken : null,
     expires_at: expiresAt,
     max_downloads: maxDownloads,
     used_bytes: usedAfter,

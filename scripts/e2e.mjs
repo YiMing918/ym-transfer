@@ -10,6 +10,7 @@ import http from 'node:http';
 import { createMockEnv } from './mock.mjs';
 import * as uploadInit from '../functions/api/upload-init.js';
 import * as uploadComplete from '../functions/api/upload-complete.js';
+import * as deleteApi from '../functions/api/delete.js';
 import * as cleanupApi from '../functions/api/cleanup.js';
 import * as statsApi from '../functions/api/stats.js';
 import * as downloadRoute from '../functions/d/[id].js';
@@ -80,6 +81,7 @@ async function main() {
   const handlers = {
     '/api/upload-init': uploadInit,
     '/api/upload-complete': uploadComplete,
+    '/api/delete': deleteApi,
     '/api/cleanup': cleanupApi,
     '/api/stats': statsApi,
   };
@@ -133,11 +135,11 @@ async function main() {
     const compRes = await fetch(`${base}/api/upload-complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: d.id }),
+      body: JSON.stringify({ id: d.id, delete_token: d.delete_token }),
     });
     const compJson = await compRes.json();
     assert.strictEqual(compRes.status, 200, 'complete 应 200：' + JSON.stringify(compJson));
-    return { id: d.id, downloadUrl: compJson.data.download_url, uploadUrl: d.upload_url };
+    return { id: d.id, downloadUrl: compJson.data.download_url, uploadUrl: d.upload_url, deleteToken: d.delete_token };
   }
 
   async function downloadAndVerify(downloadUrl, expectedBuf, expectedName) {
@@ -174,6 +176,28 @@ async function main() {
     await downloadAndVerify(`${base}${new URL(downloadUrl).pathname}`, big);
   });
 
+  console.log('— 端到端：删除令牌 —');
+  await test('凭令牌删文件：删后下载 404；错令牌 403 删不掉', async () => {
+    const buf = randomBytes(1024);
+    const { id, downloadUrl, deleteToken } = await uploadFlow({ name: 'to-delete.txt', mime: 'text/plain', sizeBytes: buf.length, hours: 24, buf });
+    assert.ok(/^[0-9a-f]{32}$/.test(deleteToken || ''), 'init 应发删除令牌');
+    const bad = await fetch(`${base}/api/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, delete_token: 'f'.repeat(32) }),
+    });
+    assert.strictEqual(bad.status, 403, '错令牌应 403');
+    const okRes = await fetch(`${base}/api/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, delete_token: deleteToken }),
+    });
+    const okJson = await okRes.json();
+    assert.strictEqual(okRes.status, 200, '对令牌应 200：' + JSON.stringify(okJson));
+    const r = await fetch(`${base}${new URL(downloadUrl).pathname}`);
+    assert.strictEqual(r.status, 404, '删后下载应 404');
+  });
+
   console.log('— 端到端：过期与清理 —');
   await test('过期链接打开是 404 中文页，且对象被懒清理', async () => {
     const initRes = await fetch(`${base}/api/upload-init`, {
@@ -183,7 +207,7 @@ async function main() {
     });
     const d = (await initRes.json()).data;
     await fetch(d.upload_url, { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: Buffer.alloc(10, 65) });
-    await fetch(`${base}/api/upload-complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id }) });
+    await fetch(`${base}/api/upload-complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: d.id, delete_token: d.delete_token }) });
     // 把过期时间改到过去（模拟过期）
     mock.env.DB.prepare('UPDATE files SET expires_at = ? WHERE id = ?').bind(Math.floor(Date.now() / 1000) - 10, d.id).run();
     const r = await fetch(`${base}/d/${d.id}`);

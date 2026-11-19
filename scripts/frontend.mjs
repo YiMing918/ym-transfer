@@ -50,7 +50,7 @@ function makeEl(id) {
 
 function runPage(html, { protocol = 'file:', search = '' } = {}) {
   const script = extractScript(html);
-  const ids = ['previewBanner', 'dropZone', 'fileInput', 'fileInfo', 'fileName', 'fileMeta', 'expiryBox', 'expirySeg', 'dlBox', 'dlSeg', 'uploadBtn', 'progressBox', 'progText', 'progPct', 'progBar', 'progSpeed', 'progEta', 'resultBox', 'linkInput', 'copyBtn', 'resultMeta', 'againBtn', 'errorBox', 'usedText', 'usedBar'];
+  const ids = ['previewBanner', 'dropZone', 'fileInput', 'fileInfo', 'fileName', 'fileMeta', 'expiryBox', 'expirySeg', 'dlBox', 'dlSeg', 'uploadBtn', 'progressBox', 'progText', 'progPct', 'progBar', 'progSpeed', 'progEta', 'resultBox', 'linkInput', 'copyBtn', 'resultMeta', 'tokenBox', 'tokenInput', 'copyTokenBtn', 'delLinkInput', 'delTokenInput', 'delBtn', 'delMsg', 'againBtn', 'errorBox', 'usedText', 'usedBar'];
   const els = {};
   for (const id of ids) els[id] = makeEl(id);
   // 有效期六个按钮（小时/天统一按小时算，默认 1 天 = 24 小时）
@@ -149,6 +149,12 @@ await test('点上传：模拟进度走完，出下载链接；复制、再传�
   assert.ok(els.linkInput.value.includes('ym-transfer.pages.dev'), '链接应是本站域名');
   assert.ok(els.resultMeta.innerHTML.includes('报告.pdf'), '结果区应显示文件名');
   assert.ok(els.resultMeta.innerHTML.includes('到期自动删除'), '结果区应提示到期删除');
+  assert.strictEqual(els.tokenBox.style.display, 'block', '结果区应显示删除令牌');
+  assert.ok(/^[0-9a-f]{32}$/.test(els.tokenInput.value), '令牌应是 32 位 hex');
+  assert.strictEqual(els.delLinkInput.value, els.linkInput.value, '删除区应预填本次链接');
+  assert.strictEqual(els.delTokenInput.value, els.tokenInput.value, '删除区应预填本次令牌');
+  els.delBtn.trigger('click');
+  assert.ok(els.delMsg.textContent.includes('模拟删除'), '预览版点删除应给模拟提示');
   els.copyBtn.trigger('click');
   assert.ok(isExecCopyCalled(), '复制应走 fallback（无 clipboard 时）');
   els.againBtn.trigger('click');

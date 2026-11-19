@@ -12,7 +12,7 @@
 // 打包时还要把 public/ 里的静态文件摊平到包根目录（原部署的资产根就是
 // public/），与 _worker.js 同放。
 //
-// 路由语义与 functions 文件路由对齐：4 个 /api/* 文件与 /d/[id] 都导出通用
+// 路由语义与 functions 文件路由对齐：5 个 /api/* 文件与 /d/[id] 都导出通用
 // onRequest（方法在函数内部分发），入口按精确路径分发、不限方法；/d/<id>
 // 用正则捕获 id 并按原样塞进 context.params（原 handler 从 params.id 取，
 // 还要用到 waitUntil，原样透传）。路径匹配前去掉一个尾斜杠（与原版文件
@@ -20,6 +20,7 @@
 // 本仓原版没有单页回退，未知路径就是平台 404，不要画蛇添足。
 
 import { onRequest as cleanup } from '../functions/api/cleanup.js';
+import { onRequest as del } from '../functions/api/delete.js';
 import { onRequest as stats } from '../functions/api/stats.js';
 import { onRequest as uploadComplete } from '../functions/api/upload-complete.js';
 import { onRequest as uploadInit } from '../functions/api/upload-init.js';
@@ -27,6 +28,7 @@ import { onRequest as download } from '../functions/d/[id].js';
 
 const ROUTES = {
   '/api/cleanup': cleanup,
+  '/api/delete': del,
   '/api/stats': stats,
   '/api/upload-complete': uploadComplete,
   '/api/upload-init': uploadInit,

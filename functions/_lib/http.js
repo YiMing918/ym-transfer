@@ -90,6 +90,18 @@ export function randomToken(bytes = 32) {
   return [...arr].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+// 令牌比对：请求方给的明文令牌先算 SHA-256，再与库里存的哈希恒定时间
+// 逐字节比（与 cleanup.js 的密钥比对同范式），避免计时侧信道；库里只存
+// 哈希，库泄露 ≠ 令牌泄露。任一为空直接 false。
+export async function tokenHashMatches(givenToken, storedHash) {
+  if (!givenToken || !storedHash) return false;
+  const h = await sha256Hex(String(givenToken));
+  if (h.length !== String(storedHash).length) return false;
+  let diff = 0;
+  for (let i = 0; i < h.length; i++) diff |= h.charCodeAt(i) ^ String(storedHash).charCodeAt(i);
+  return diff === 0;
+}
+
 export function isoOf(sec) { return sec ? new Date(sec * 1000).toISOString() : null; }
 
 // HTML 转义：一切不可信文本进页面前必过

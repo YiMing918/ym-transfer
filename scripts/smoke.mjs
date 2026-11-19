@@ -8,6 +8,7 @@ import { createMockEnv, callHandler } from './mock.mjs';
 import { presignPut, presignGet } from '../functions/_lib/r2sign.js';
 import * as uploadInit from '../functions/api/upload-init.js';
 import * as uploadComplete from '../functions/api/upload-complete.js';
+import * as deleteApi from '../functions/api/delete.js';
 import * as cleanupApi from '../functions/api/cleanup.js';
 import * as statsApi from '../functions/api/stats.js';
 import * as downloadRoute from '../functions/d/[id].js';
@@ -222,18 +223,33 @@ await test('正常确认：R2 有对象且大小一致 → ready，重复确认�
   const mock = freshEnv();
   const init = await initFile(mock, { size: 1000 });
   const id = init.json.data.id;
+  const token = init.json.data.delete_token;
   const row = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first();
   await mock.env.FILES.put(row.r2_key, Buffer.alloc(1000, 7));
-  const r = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id }, env: mock.env, waitUntil: mock.waitUntil });
+  const r = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: token }, env: mock.env, waitUntil: mock.waitUntil });
   eq(r.res.status, 200);
   ok(r.json.data.download_url.endsWith('/d/' + id));
-  const again = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id }, env: mock.env, waitUntil: mock.waitUntil });
+  const again = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: token }, env: mock.env, waitUntil: mock.waitUntil });
   eq(again.res.status, 200, '重复确认应幂等成功');
+});
+await test('确认所有权：不带令牌 / 错令牌 → 403，文件仍是 pending', async () => {
+  const mock = freshEnv();
+  const init = await initFile(mock, { size: 1000 });
+  const id = init.json.data.id;
+  const row = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first();
+  await mock.env.FILES.put(row.r2_key, Buffer.alloc(1000, 7));
+  const noTok = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(noTok.res.status, 403);
+  eq(noTok.json.error.code, 'forbidden');
+  const badTok = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: 'f'.repeat(32) }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(badTok.res.status, 403);
+  const after = mock.env.DB.prepare('SELECT status FROM files WHERE id = ?').bind(id).first();
+  eq(after.status, 'pending', '令牌不对不许把文件转 ready');
 });
 await test('R2 里没有对象 → 400 not_uploaded', async () => {
   const mock = freshEnv();
   const init = await initFile(mock, { size: 1000 });
-  const r = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id: init.json.data.id }, env: mock.env, waitUntil: mock.waitUntil });
+  const r = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id: init.json.data.id, delete_token: init.json.data.delete_token }, env: mock.env, waitUntil: mock.waitUntil });
   eq(r.res.status, 400);
   eq(r.json.error.code, 'not_uploaded');
 });
@@ -243,7 +259,7 @@ await test('大小不一致 → 400 size_mismatch', async () => {
   const id = init.json.data.id;
   const row = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first();
   await mock.env.FILES.put(row.r2_key, Buffer.alloc(999, 7));
-  const r = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id }, env: mock.env, waitUntil: mock.waitUntil });
+  const r = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: init.json.data.delete_token }, env: mock.env, waitUntil: mock.waitUntil });
   eq(r.res.status, 400);
   eq(r.json.error.code, 'size_mismatch');
 });
@@ -350,6 +366,74 @@ await test('返回已用字节与文件数', async () => {
   eq(r.json.data.file_count, 2);
   eq(r.json.data.total_cap_bytes, 10 * 1024 * 1024 * 1024);
   eq(r.json.data.max_file_bytes, 5 * 1024 * 1024 * 1024);
+});
+
+console.log('— 删除令牌 /api/delete —');
+await test('建单发令牌：返回 32 位 hex，库里只存它的 SHA-256 哈希', async () => {
+  const mock = freshEnv();
+  const r = await initFile(mock, { size: 100 });
+  eq(r.res.status, 200);
+  const token = r.json.data.delete_token;
+  ok(/^[0-9a-f]{32}$/.test(token), 'delete_token 应为 32 位 hex');
+  const row = mock.env.DB.prepare('SELECT delete_token_hash FROM files WHERE id = ?').bind(r.json.data.id).first();
+  const expect = createHash('sha256').update(token).digest('hex');
+  eq(row.delete_token_hash, expect, '库里应只存令牌的 SHA-256');
+  ok(row.delete_token_hash !== token, '库里不应存令牌明文');
+});
+await test('凭令牌删除：对象与记录都没了，下载链接随即 404', async () => {
+  const mock = freshEnv();
+  const init = await initFile(mock, { size: 1000 });
+  const id = init.json.data.id;
+  const token = init.json.data.delete_token;
+  const row = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first();
+  await mock.env.FILES.put(row.r2_key, Buffer.alloc(1000, 7));
+  const comp = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: token }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(comp.res.status, 200);
+  const r = await callHandler(deleteApi, { method: 'POST', url: 'http://localhost/api/delete', headers: apiHeaders(), body: { id, delete_token: token }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(r.res.status, 200);
+  eq(r.json.data.deleted, true);
+  eq(await mock.env.FILES.head(row.r2_key), null, 'R2 对象应删');
+  eq(mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(id).first(), null, 'D1 记录应删');
+  const dl = await callHandler(downloadRoute, { method: 'GET', url: 'http://localhost/d/' + id, params: { id }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(dl.res.status, 404, '删后下载应 404');
+});
+await test('错令牌删除 → 403，文件与对象都还在', async () => {
+  const mock = freshEnv();
+  const init = await initFile(mock, { size: 1000 });
+  const id = init.json.data.id;
+  const row = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first();
+  await mock.env.FILES.put(row.r2_key, Buffer.alloc(1000, 7));
+  const r = await callHandler(deleteApi, { method: 'POST', url: 'http://localhost/api/delete', headers: apiHeaders(), body: { id, delete_token: 'e'.repeat(32) }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(r.res.status, 403);
+  ok(mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(id).first(), '记录应保留');
+  ok(await mock.env.FILES.head(row.r2_key), 'R2 对象应保留');
+});
+await test('老文件没令牌：删除回 no_token，下载照常（等过期口径不变）', async () => {
+  const mock = freshEnv();
+  insertFileRow(mock, { id: '7'.repeat(32), r2Key: 'f/2026/11/777', size: 500, status: 'ready' });
+  await mock.env.FILES.put('f/2026/11/777', Buffer.alloc(500, 1));
+  const r = await callHandler(deleteApi, { method: 'POST', url: 'http://localhost/api/delete', headers: apiHeaders(), body: { id: '7'.repeat(32), delete_token: 'a'.repeat(32) }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(r.res.status, 400);
+  eq(r.json.error.code, 'no_token');
+  const dl = await callHandler(downloadRoute, { method: 'GET', url: 'http://localhost/d/' + '7'.repeat(32), params: { id: '7'.repeat(32) }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(dl.res.status, 302, '老文件下载不应受影响');
+});
+await test('删不存在的文件 → 404；不带令牌 → 400', async () => {
+  const mock = freshEnv();
+  const r1 = await callHandler(deleteApi, { method: 'POST', url: 'http://localhost/api/delete', headers: apiHeaders(), body: { id: '0'.repeat(32), delete_token: 'a'.repeat(32) }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(r1.res.status, 404);
+  const r2 = await callHandler(deleteApi, { method: 'POST', url: 'http://localhost/api/delete', headers: apiHeaders(), body: { id: '0'.repeat(32) }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(r2.res.status, 400);
+  eq(r2.json.error.code, 'bad_token');
+});
+await test('直链有效期 5 分钟：302 的 Location 带 X-Amz-Expires=300', async () => {
+  const mock = freshEnv();
+  insertFileRow(mock, { id: '8'.repeat(32), r2Key: 'f/2026/11/888', size: 500, status: 'ready', expiresInSec: 86400 });
+  await mock.env.FILES.put('f/2026/11/888', Buffer.alloc(500, 1));
+  const r = await callHandler(downloadRoute, { method: 'GET', url: 'http://localhost/d/' + '8'.repeat(32), params: { id: '8'.repeat(32) }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(r.res.status, 302);
+  const loc = r.res.headers.get('Location');
+  ok(loc && loc.includes('X-Amz-Expires=300'), `直链应 300 秒有效，实际 ${loc}`);
 });
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
