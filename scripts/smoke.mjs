@@ -129,7 +129,8 @@ await test('正常创建：返回 id、上传地址、下载链接，D1 里是 p
   const row = mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(r.json.data.id).first();
   eq(row.status, 'pending');
   eq(row.orig_name, '报告.pdf');
-  ok(/^f\/\d{4}\/\d{2}\/[0-9a-f]{32}$/.test(row.r2_key), 'R2 键应为 f/年/月/uuid，不含原文件名');
+  ok(/^staging\/[0-9a-f]{32}$/.test(row.r2_key), 'pending 的 R2 键应为临时键 staging/uuid（M11），不含原文件名');
+  ok(r.json.data.upload_url.includes('/staging/'), '上传地址应指向临时键');
   ok(!row.r2_key.includes('报告'), 'R2 键不应含原文件名');
 });
 await test('大小校验：0、负数、超 5GB、非整数都 400', async () => {
@@ -229,8 +230,50 @@ await test('正常确认：R2 有对象且大小一致 → ready，重复确认�
   const r = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: token }, env: mock.env, waitUntil: mock.waitUntil });
   eq(r.res.status, 200);
   ok(r.json.data.download_url.endsWith('/d/' + id));
+  // M11 转正结果：记录的键换成正式键 files/<同一 uuid>，临时对象已删、
+  // 正式对象在且大小对
+  const after = mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(id).first();
+  eq(after.status, 'ready');
+  eq(after.r2_key, 'files/' + row.r2_key.slice('staging/'.length), 'r2_key 应换成正式键');
+  eq(await mock.env.FILES.head(row.r2_key), null, '临时对象应被删掉');
+  const finalHead = await mock.env.FILES.head(after.r2_key);
+  ok(finalHead && finalHead.size === 1000, '正式对象应存在且大小一致');
   const again = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: token }, env: mock.env, waitUntil: mock.waitUntil });
   eq(again.res.status, 200, '重复确认应幂等成功');
+});
+await test('M11：确认后往旧临时键再写不同内容，正式文件不变、下载仍指正式键', async () => {
+  const mock = freshEnv();
+  const init = await initFile(mock, { size: 1000 });
+  const id = init.json.data.id;
+  const token = init.json.data.delete_token;
+  const stagingKey = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first().r2_key;
+  await mock.env.FILES.put(stagingKey, Buffer.alloc(1000, 7));
+  const comp = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: token }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(comp.res.status, 200);
+  const finalKey = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first().r2_key;
+  // 攻击者拿没过期的旧上传地址再 PUT（在 mock 里等价于直接往临时键写）
+  await mock.env.FILES.put(stagingKey, Buffer.alloc(1000, 9));
+  const stored = mock.store.get(finalKey);
+  ok(stored && stored.body.equals(Buffer.alloc(1000, 7)), '正式对象内容应仍是原文件');
+  const dl = await callHandler(downloadRoute, { method: 'GET', url: 'http://localhost/d/' + id, params: { id }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(dl.res.status, 302);
+  ok(new URL(dl.res.headers.get('Location')).pathname.endsWith('/' + finalKey), '下载直链应指向正式键');
+});
+await test('M11：转存失败 → 500 copy_failed，仍是 pending、临时对象保留可重试确认', async () => {
+  const mock = freshEnv();
+  const init = await initFile(mock, { size: 1000 });
+  const id = init.json.data.id;
+  const stagingKey = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first().r2_key;
+  await mock.env.FILES.put(stagingKey, Buffer.alloc(1000, 7));
+  // 把 S3 端点改到连不上的地址，模拟 CopyObject 失败（拦截层主机名对不上会放行真 fetch，立即连接失败）
+  mock.env.R2_S3_ENDPOINT = 'http://127.0.0.1:9';
+  const r = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: init.json.data.delete_token }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(r.res.status, 500);
+  eq(r.json.error.code, 'copy_failed');
+  const after = mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(id).first();
+  eq(after.status, 'pending', '转存失败不许转 ready');
+  eq(after.r2_key, stagingKey, '记录仍应指向临时键');
+  ok(await mock.env.FILES.head(stagingKey), '临时对象应保留，用户重试确认即可');
 });
 await test('确认所有权：不带令牌 / 错令牌 → 403，文件仍是 pending', async () => {
   const mock = freshEnv();
@@ -389,10 +432,11 @@ await test('凭令牌删除：对象与记录都没了，下载链接随即 404'
   await mock.env.FILES.put(row.r2_key, Buffer.alloc(1000, 7));
   const comp = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: token }, env: mock.env, waitUntil: mock.waitUntil });
   eq(comp.res.status, 200);
+  const finalRow = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first();
   const r = await callHandler(deleteApi, { method: 'POST', url: 'http://localhost/api/delete', headers: apiHeaders(), body: { id, delete_token: token }, env: mock.env, waitUntil: mock.waitUntil });
   eq(r.res.status, 200);
   eq(r.json.data.deleted, true);
-  eq(await mock.env.FILES.head(row.r2_key), null, 'R2 对象应删');
+  eq(await mock.env.FILES.head(finalRow.r2_key), null, 'R2 正式对象应删');
   eq(mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(id).first(), null, 'D1 记录应删');
   const dl = await callHandler(downloadRoute, { method: 'GET', url: 'http://localhost/d/' + id, params: { id }, env: mock.env, waitUntil: mock.waitUntil });
   eq(dl.res.status, 404, '删后下载应 404');

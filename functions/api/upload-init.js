@@ -3,7 +3,7 @@
 
 import { json, fail, readJson, nowSec, ipHash, randomToken, sha256Hex, HttpError } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
-import { presignPut, newObjectKey } from '../_lib/r2sign.js';
+import { presignPut, newStagingKey } from '../_lib/r2sign.js';
 import { MAX_FILE_BYTES, TOTAL_CAP_BYTES, UPLOAD_URL_TTL_SEC, PENDING_TTL_SEC, PENDING_CAP_BYTES } from '../_lib/consts.js';
 
 export { MAX_FILE_BYTES, TOTAL_CAP_BYTES };
@@ -113,7 +113,13 @@ export async function onRequest(context) {
   }
 
   const id = randomToken(16); // 32 位 hex，不可猜
-  const r2Key = newObjectKey();
+  // M11：预签名 PUT 地址指向临时键 staging/<uuid>，不直接写正式位置。
+  // 预签名地址没法提前作废（有效期仍是 6 小时、慢传口径不变），但确认
+  // 上传时对象会被复制到正式键 files/<uuid> 并删掉临时对象（见
+  // upload-complete.js）——之后这个地址就算漏出去，也只能往已废弃的
+  // 临时位置写，动不了正式文件。pending 期间记录的 r2_key 就是临时键，
+  // 定时清理按记录删键时删的正是它，与旧流程半截文件的清理口径一致。
+  const r2Key = newStagingKey();
   const expiresAt = now + expiresHours * 3600;
 
   // 删除令牌（H4/M1）：建单时生成，明文只在这一次响应里给上传者，库里

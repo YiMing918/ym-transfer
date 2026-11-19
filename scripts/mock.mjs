@@ -65,6 +65,38 @@ export function createMockR2(store = new Map()) {
   };
 }
 
+// —— 假 S3 CopyObject（供 upload-complete 的转正复制走 fetch 时用）——
+// 生产代码用 S3 API 做 CopyObject（R2 绑定没有 copy 操作），本地测试里
+// R2_S3_ENDPOINT 指向假域名、真 fetch 出不去，故按「最近一次
+// createMockEnv 的端点主机名 + 共享 store」拦截 global fetch：只认带
+// x-amz-copy-source 头的 PUT（即 CopyObject），其余请求一律放行真 fetch。
+// e2e 里端点会被改成 127.0.0.1 的假 R2 服务，主机名对不上、自动放行到
+// 真服务（假 R2 服务自己实现 COPY），两边口径一致。
+let activeMockS3 = null;
+let fetchWrapped = false;
+function ensureMockS3Fetch() {
+  if (fetchWrapped) return;
+  fetchWrapped = true;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    try {
+      const url = new URL(typeof input === 'string' ? input : input.url);
+      const method = String(init.method || (typeof input !== 'string' ? input.method : '') || 'GET').toUpperCase();
+      const headers = new Headers(init.headers || (typeof input !== 'string' ? input.headers : undefined));
+      const copySource = headers.get('x-amz-copy-source');
+      if (activeMockS3 && url.host === activeMockS3.host && method === 'PUT' && copySource) {
+        const dstKey = decodeURIComponent(url.pathname.replace(/^\/[^/]+\//, ''));
+        const srcKey = decodeURIComponent(copySource.replace(/^\/[^/]+\//, ''));
+        const obj = activeMockS3.store.get(srcKey);
+        if (!obj) return new Response('<Error><Code>NoSuchKey</Code></Error>', { status: 404 });
+        activeMockS3.store.set(dstKey, { size: obj.size, body: obj.body });
+        return new Response('<CopyObjectResult></CopyObjectResult>', { status: 200, headers: { 'Content-Type': 'application/xml' } });
+      }
+    } catch { /* 解析不了就放行真 fetch */ }
+    return realFetch(input, init);
+  };
+}
+
 export function createMockEnv(overrides = {}) {
   const store = overrides._store || new Map();
   const pending = [];
@@ -80,6 +112,9 @@ export function createMockEnv(overrides = {}) {
     ...overrides.env,
   };
   delete env._store;
+  // 登记本 env 为当前假 S3 的数据源（CopyObject 拦截按端点主机名认它）
+  try { activeMockS3 = { host: new URL(env.R2_S3_ENDPOINT).host, store }; } catch { activeMockS3 = null; }
+  ensureMockS3Fetch();
   return {
     env,
     store,

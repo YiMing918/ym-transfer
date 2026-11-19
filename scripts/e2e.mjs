@@ -50,6 +50,18 @@ async function main() {
     const m = u.pathname.match(/^\/ym-transfer-files\/(.+)$/);
     if (!m) { res.writeHead(404); res.end('no such bucket/key'); return; }
     const key = decodeURIComponent(m[1]);
+    if (req.method === 'PUT' && req.headers['x-amz-copy-source']) {
+      // S3 CopyObject（upload-complete 转正复制走这条）：源键在
+      // x-amz-copy-source（/<bucket>/<key>）里，字节只在存储内搬
+      await readBody(req);
+      const srcKey = decodeURIComponent(String(req.headers['x-amz-copy-source']).replace(/^\/[^/]+\//, ''));
+      const src = store.get(srcKey);
+      if (!src) { res.writeHead(404); res.end('<Error><Code>NoSuchKey</Code></Error>'); return; }
+      store.set(key, { size: src.size, body: src.body });
+      res.writeHead(200, { 'Content-Type': 'application/xml' });
+      res.end('<CopyObjectResult></CopyObjectResult>');
+      return;
+    }
     if (req.method === 'PUT') {
       const body = await readBody(req);
       putLog.push({ key, contentType: req.headers['content-type'], size: body.length });
@@ -196,6 +208,17 @@ async function main() {
     assert.strictEqual(okRes.status, 200, '对令牌应 200：' + JSON.stringify(okJson));
     const r = await fetch(`${base}${new URL(downloadUrl).pathname}`);
     assert.strictEqual(r.status, 404, '删后下载应 404');
+  });
+
+  console.log('— 端到端：M11 确认后旧上传地址覆盖不了正式文件 —');
+  await test('complete 后拿旧 upload_url 再 PUT 不同内容：下载到的仍是原文件', async () => {
+    const orig = randomBytes(2048);
+    const evil = randomBytes(2048);
+    const { downloadUrl, uploadUrl } = await uploadFlow({ name: 'm11.txt', mime: 'text/plain', sizeBytes: orig.length, hours: 24, buf: orig });
+    // 攻击者视角：上传地址还没过期，再 PUT 一份不同内容（长度相同，模拟覆盖）
+    const rePut = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: evil });
+    assert.strictEqual(rePut.status, 200, '旧地址本身仍可 PUT（预签名没法作废，写的是临时位置）');
+    await downloadAndVerify(`${base}${new URL(downloadUrl).pathname}`, orig);
   });
 
   console.log('— 端到端：过期与清理 —');

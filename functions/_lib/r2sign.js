@@ -56,13 +56,37 @@ function objectUrl(endpoint, bucket, key) {
   return new URL(`${endpoint}/${bucket}/${key.split('/').map(uriEnc).join('/')}`);
 }
 
-// 对象键：f/<年>/<月>/<uuid>，不含原文件名
+// 对象键（旧）：f/<年>/<月>/<uuid>，不含原文件名。
+// v1.1.7 起新上传不再用这个键：上传先落 staging/ 临时键、确认后复制到
+// files/ 正式键（见下面三个函数），堵预签名 PUT 地址在确认后仍能覆盖
+// 正式文件的口子（M11）。本函数只留作存量老记录键形态的说明，新代码
+// 不要再调用它生成键。
 export function newObjectKey() {
   const d = new Date();
   const yyyy = d.getUTCFullYear();
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
   const uuid = crypto.randomUUID().replace(/-/g, '');
   return `f/${yyyy}/${mm}/${uuid}`;
+}
+
+// 对象键（新，M11）：临时键 staging/<uuid> 与正式键 files/<uuid> 共用同一
+// 个随机 uuid 后缀——正式键能由临时键换前缀直接算出，不用多存一列、也不
+// 用链接 ID 当键（链接 ID 是下载凭证，写进上传地址路径会顺带把下载凭证
+// 漏给拿到上传地址的人；uuid 后缀与链接 ID 互相独立、谁也不含谁）。
+export function newStagingKey() {
+  const uuid = crypto.randomUUID().replace(/-/g, '');
+  return `staging/${uuid}`;
+}
+export function isStagingKey(key) {
+  return typeof key === 'string' && key.startsWith('staging/');
+}
+export function finalKeyForStaging(stagingKey) {
+  return isStagingKey(stagingKey) ? `files/${stagingKey.slice('staging/'.length)}` : null;
+}
+export function stagingKeyForFinal(finalKey) {
+  return typeof finalKey === 'string' && finalKey.startsWith('files/')
+    ? `staging/${finalKey.slice('files/'.length)}`
+    : null;
 }
 
 // 签发一个 PUT 预签名 URL：签名里锁死 Content-Type，类型不符上传会被 S3 拒绝
@@ -104,6 +128,47 @@ export async function presignPut(env, key, contentType, expiresSec = 21600, nowD
   const headers = { 'Content-Type': contentType };
   if (hasLen) headers['Content-Length'] = String(contentLength);
   return { url: `${url.origin}${url.pathname}?${query}&X-Amz-Signature=${signature}`, headers, expires_in: expiresSec };
+}
+
+// S3 CopyObject（服务端签名调用，M11）：把对象在 R2 内部从 srcKey 复制到
+// dstKey，文件字节只在 R2 内部搬、不流经 Worker 内存（大文件也不会爆）。
+// R2 的绑定 API 没有 copy 操作，只能走 S3 API：用与预签名同一套 SigV4，
+// 改成 Authorization 头签名（非查询串预签名）。复制会连源对象的
+// Content-Type 等元数据一起带过去（COPY 语义），与直传时的类型一致。
+// 成功返回 true；HTTP 非 2xx 或网络失败抛错，由调用方决定重试口径。
+export async function s3CopyObject(env, srcKey, dstKey) {
+  const { endpoint, bucket, accessKey, secretKey } = getCreds(env);
+  const { amzDate, dateStamp } = amzDates(new Date());
+  const url = objectUrl(endpoint, bucket, dstKey);
+  const copySource = `/${bucket}/${srcKey.split('/').map(uriEnc).join('/')}`;
+  const payloadHash = await sha256HexOf('');
+  const signedHeaders = 'host;x-amz-content-sha256;x-amz-copy-source;x-amz-date';
+  const canonicalHeaders =
+    `host:${url.host}\n` +
+    `x-amz-content-sha256:${payloadHash}\n` +
+    `x-amz-copy-source:${copySource}\n` +
+    `x-amz-date:${amzDate}\n`;
+  const signature = await signRequest({
+    method: 'PUT', url, canonicalQuery: '', signedHeaders,
+    canonicalHeaders, payloadHash, accessKey, secretKey, amzDate, dateStamp,
+  });
+  const scope = `${dateStamp}/auto/s3/aws4_request`;
+  const res = await fetch(url.toString(), {
+    method: 'PUT',
+    headers: {
+      Authorization: `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+      'x-amz-date': amzDate,
+      'x-amz-content-sha256': payloadHash,
+      'x-amz-copy-source': copySource,
+    },
+  });
+  if (!res.ok) {
+    // 错误体可能含内部细节：只把状态码带进异常给调用方记日志，不回吐请求方
+    try { await res.text(); } catch { /* 忽略 */ }
+    throw new Error(`CopyObject 失败（HTTP ${res.status}）`);
+  }
+  try { await res.text(); } catch { /* 忽略 */ }
+  return true;
 }
 
 // RFC 5987 文件名编码（下载时 Content-Disposition 用）：UTF-8 百分号编码，只留 attr-char

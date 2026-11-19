@@ -1,10 +1,18 @@
 // api/upload-complete.js — 上传完成确认：浏览器 PUT 到 R2 成功后调本接口
 // 后端用 R2 HEAD 校验对象确实存在且大小与声明一致，才把状态从 pending 改为 ready。
 // 幂等：已经是 ready 的重复调用直接返回成功。
+// M11（v1.1.7）：新上传的对象在临时键 staging/<uuid> 上——校验通过后用
+// S3 CopyObject 把它复制到正式键 files/<uuid>（字节只在 R2 内部搬、不经
+// Worker 内存），对正式对象再 HEAD 验一次大小，然后把记录的 r2_key 改成
+// 正式键、删掉临时对象。这样确认之后，原预签名 PUT 地址（没法提前作废、
+// 有效期 6 小时）再 PUT 也只能写已废弃的临时位置，覆盖不了正式文件。
+// 存量老上传（升级部署瞬间还在传的 pending，r2_key 是旧式 f/… 键、对象
+// 就在正式位置）走原路径直接转 ready，不复制、不打断。
 
 import { json, fail, readJson, nowSec, hitRateLimit, tokenHashMatches } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
 import { UPLOAD_URL_TTL_SEC } from '../_lib/consts.js';
+import { isStagingKey, finalKeyForStaging, s3CopyObject } from '../_lib/r2sign.js';
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -67,6 +75,10 @@ export async function onRequest(context) {
     let objectDeleted = true;
     try { await env.FILES.delete(row.r2_key); } catch { objectDeleted = false; }
     if (objectDeleted) {
+      // M11：新流程的 pending 若此前有过一次转正尝试、正式键上可能留了
+      // 一份复制，顺手一并删掉（删不到/没有也不影响主语义）
+      const fk = finalKeyForStaging(row.r2_key);
+      if (fk) { try { await env.FILES.delete(fk); } catch { /* 兜底同上 */ } }
       try { await run(env, 'DELETE FROM files WHERE id = ?', id); } catch { /* 记录没删掉，下次清理再清 */ }
     }
     return fail('expired', '这个上传已过期', 410);
@@ -80,6 +92,45 @@ export async function onRequest(context) {
     // 不删它最长要等 pending 超时清理才回收），删失败也不阻塞报错返回
     try { await env.FILES.delete(row.r2_key); } catch { /* 下次清理兜底 */ }
     return fail('size_mismatch', `文件大小不一致（应为 ${row.size_bytes} 字节，实际 ${head.size} 字节），请重新上传`, 400);
+  }
+
+  if (isStagingKey(row.r2_key)) {
+    // —— M11 新流程：临时对象转正 ——
+    const stagingKey = row.r2_key;
+    const finalKey = finalKeyForStaging(stagingKey);
+    // 复制失败不转 ready、不删临时对象：记录还是 pending、临时对象还在，
+    // 用户重试确认即可接着转正，不用重传（复制是 R2 内部搬字节，可重试）。
+    try {
+      await s3CopyObject(env, stagingKey, finalKey);
+    } catch (e) {
+      console.error('s3CopyObject failed:', e);
+      return fail('copy_failed', '文件确认失败（转存出错），请稍后重试确认，不用重新上传', 500);
+    }
+    // 复制后对正式对象再 HEAD 验一次大小（短重试兜住存储侧短暂延迟）：
+    // 验不过就删掉这份坏复制、保留临时对象与 pending 记录，等重试。
+    let finalHead = null;
+    for (let i = 0; i < 3 && !finalHead; i++) {
+      try { finalHead = await env.FILES.head(finalKey); } catch { finalHead = null; }
+      if (!finalHead && i < 2) await new Promise((r) => setTimeout(r, 200));
+    }
+    if (!finalHead || finalHead.size !== row.size_bytes) {
+      try { await env.FILES.delete(finalKey); } catch { /* 坏复制删不掉时由清理兜底 */ }
+      return fail('copy_failed', '文件确认失败（转存校验没过），请稍后重试确认，不用重新上传', 500);
+    }
+    // 先把记录转 ready 并把 r2_key 换成正式键，再删临时对象：顺序反过来
+    // （先删临时、后改记录）一旦改记录失败，记录会指着已删的临时键、
+    // 正式对象反而成了无记录孤儿。临时对象删失败不阻塞成功返回——它已
+    // 不被任何记录引用，删文件的各路径会顺手再删一次（见 delete/cleanup），
+    // 最终还有 R2 桶 10 天生命周期兜底。
+    const upd2 = await run(env, "UPDATE files SET status = 'ready', expires_at = ?, r2_key = ? WHERE id = ? AND status = 'pending'", newExpiresAt, finalKey, id);
+    try { await env.FILES.delete(stagingKey); } catch { /* 残留临时对象由删文件路径顺手清 + 生命周期兜底 */ }
+    if (upd2 && upd2.meta && upd2.meta.changes === 0) {
+      const fresh = await first(env, 'SELECT * FROM files WHERE id = ?', id);
+      if (fresh && fresh.status === 'ready') {
+        return json({ id, download_url: downloadUrl, expires_at: fresh.expires_at, max_downloads: fresh.max_downloads, name: fresh.orig_name, size: fresh.size_bytes });
+      }
+    }
+    return json({ id, download_url: downloadUrl, expires_at: newExpiresAt, max_downloads: row.max_downloads, name: row.orig_name, size: row.size_bytes });
   }
 
   const upd = await run(env, "UPDATE files SET status = 'ready', expires_at = ? WHERE id = ? AND status = 'pending'", newExpiresAt, id);

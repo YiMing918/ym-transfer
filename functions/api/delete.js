@@ -6,6 +6,7 @@
 
 import { json, fail, readJson, hitRateLimit, tokenHashMatches } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
+import { stagingKeyForFinal } from '../_lib/r2sign.js';
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -45,6 +46,11 @@ export async function onRequest(context) {
   } catch {
     return fail('delete_failed', '删除失败，请稍后再试', 500);
   }
+  // M11：正式文件可能有转正时没删掉的残留临时对象（攻击者拿旧上传地址
+  // 重 PUT 也只会写回这个临时键），顺手一并删掉；删失败不影响删除结果，
+  // 残留最终由定时清理/桶生命周期兜底。老文件键没有配对键，自动跳过。
+  const stagingKey = stagingKeyForFinal(row.r2_key);
+  if (stagingKey) { try { await env.FILES.delete(stagingKey); } catch { /* 兜底同上 */ } }
   try { await run(env, 'DELETE FROM files WHERE id = ?', id); } catch { /* 记录没删掉，定时清理会兜底 */ }
   return json({ id, deleted: true });
 }

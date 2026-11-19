@@ -7,7 +7,7 @@
 
 import { nowSec, esc, hitRateLimit, SECURITY_HEADERS } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
-import { presignGet } from '../_lib/r2sign.js';
+import { presignGet, stagingKeyForFinal } from '../_lib/r2sign.js';
 import { PRESIGN_GET_TTL_SEC } from '../_lib/consts.js';
 
 function gonePage(msg) {
@@ -50,6 +50,9 @@ export async function onRequest(context) {
     waitUntil((async () => {
       try { await env.FILES.delete(row.r2_key); }
       catch { return; }
+      // M11：正式键可能有残留临时对象，顺手删（失败不影响主语义）
+      const stagingKey = stagingKeyForFinal(row.r2_key);
+      if (stagingKey) { try { await env.FILES.delete(stagingKey); } catch { /* 定时清理/生命周期兜底 */ } }
       try { await run(env, 'DELETE FROM files WHERE id = ?', id); } catch { /* 下次再清 */ }
     })());
     return gonePage('这个文件已经过期被删除了');
