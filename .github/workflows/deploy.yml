@@ -25,6 +25,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: 准备 Node（跑测试用）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 跑全套测试（不过不部署）
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' }}
+        run: npm test
       - name: 未配令牌时给出提示并结束
         if: ${{ env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == '' }}
         run: echo "未配置 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID，本次跳过部署（属正常：用 Pages 连 Git 部署的人不需要它们）。"
