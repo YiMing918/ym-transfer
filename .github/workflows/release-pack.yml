@@ -114,7 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release view "$TAG" > /dev/null
-          gh release delete-asset "$TAG" "ym-transfer-SHA256SUMS.txt" -y || true
+          gh release delete-asset "$TAG" "SHA256SUMS.txt" -y || true
           gh release view "$TAG" --json assets --jq '.assets[].name' | grep -E '^ym-transfer-deploy-[0-9]{8}\.zip$' | grep -vx "$ZIPNAME" | while read -r a; do echo "删除旧包：$a"; gh release delete-asset "$TAG" "$a" -y; done || true
           gh release view "$TAG" --json assets --jq '.assets[].name' | grep -E '^ym-transfer-worker-deploy-[0-9]{8}\.zip$' | grep -vx "$WZIPNAME" | while read -r a; do echo "删除旧直传包：$a"; gh release delete-asset "$TAG" "$a" -y; done || true
           gh release upload "$TAG" "$ZIPNAME" "$WZIPNAME" SHA256SUMS.txt --clobber
