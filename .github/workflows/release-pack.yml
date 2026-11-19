@@ -61,12 +61,14 @@ jobs:
           functions/_lib/http.js
           functions/_lib/r2sign.js
           functions/api/cleanup.js
+          functions/api/delete.js
           functions/api/stats.js
           functions/api/upload-complete.js
           functions/api/upload-init.js
           functions/d/[id].js
           package.json
           public/index.html
+          public/_headers
           r2-cors.json
           schema/0001_init.sql
           schema/0002_add_max_downloads.sql
