@@ -71,6 +71,7 @@ jobs:
           schema/0001_init.sql
           schema/0002_add_max_downloads.sql
           schema/0003_drop_redundant_index.sql
+          schema/0004_add_delete_token.sql
           wrangler.toml.example
           PACKLIST
           find stage -type f -exec touch -d '1980-01-01 00:00:00' {} +
