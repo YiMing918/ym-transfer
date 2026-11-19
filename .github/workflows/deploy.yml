@@ -45,6 +45,7 @@ jobs:
           fi
           # 0003 删冗余索引：DROP INDEX IF EXISTS 本身幂等，可重复跑
           npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0003_drop_redundant_index.sql
+          npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0004_add_delete_token.sql
       - name: 推送 Pages 加密变量（Secret 逐个灌入，缺哪个跳哪个）
         # 首次运行时项目还不存在（由下一步的部署创建），本步会失败但不许中断：continue-on-error 放行，
         # 部署建好项目后手动再跑一次本工作流，密钥灌入后随第二次部署生效。
