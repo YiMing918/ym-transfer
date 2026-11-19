@@ -28,9 +28,14 @@ export async function onRequest(context) {
     return fail('unauthorized', '密钥不对', 401);
   }
   const now = nowSec();
+  // 第一分支只管 ready：pending 的 expires_at 是用户选的短有效期（最短
+  // 1 小时），而上传窗口有 6 小时——若按 expires_at 清 pending，慢传大文件
+  // 会在传完前被误删。pending 一律走第二分支、只按 PENDING_TTL（上传窗口
+  // + 缓冲）判超时。ORDER BY 保证积压时先清最旧的，不会总清新行饿死旧行。
   const rows = await all(env, `SELECT id, r2_key FROM files
-    WHERE (expires_at <= ? AND status IN ('pending','ready'))
-       OR (status = 'pending' AND created_at <= ?) LIMIT 200`,
+    WHERE (expires_at <= ? AND status = 'ready')
+       OR (status = 'pending' AND created_at <= ?)
+    ORDER BY expires_at ASC LIMIT 200`,
     now, now - PENDING_TTL_SEC);
 
   let deleted = 0;

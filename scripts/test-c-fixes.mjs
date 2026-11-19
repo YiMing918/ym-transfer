@@ -55,17 +55,16 @@ await test('限 1 次：带 bot/scanner 字样的 UA 并发伪装不能超发（
   const r2 = await getDownload(mock, id, { ua: 'facebookexternalhit/1.1' });
   eq(r2.res.status, 404, '第 2 个伪装 UA 应被原子计数拦下');
 });
-await test('HEAD 请求不计数：限 1 次文件 HEAD 后 GET 仍可下', async () => {
+await test('HEAD 与 GET 同等计数：限 1 次文件 HEAD 领直链即耗掉名额（v1.1.5 修复 HEAD 不计数绕过）', async () => {
   const mock = createMockEnv();
   const id = 'c'.repeat(32);
   insertFileRow(mock, { id, r2Key: 'f/t/c1c', maxDownloads: 1 });
   const rh = await getDownload(mock, id, { method: 'HEAD' });
   eq(rh.res.status, 302, 'HEAD 应回跳转');
   await mock.drainWaitUntil();
-  eq(downloadsOf(mock, id), 0, 'HEAD 不应计数');
+  eq(downloadsOf(mock, id), 1, 'HEAD 领直链必须计数，不能不耗次数反复新领');
   const rg = await getDownload(mock, id, {});
-  eq(rg.res.status, 302, 'HEAD 之后的那次 GET 应仍有名额');
-  eq(downloadsOf(mock, id), 1);
+  eq(rg.res.status, 404, 'HEAD 已耗掉唯一名额，之后的 GET 应被拒');
 });
 
 console.log('— C-35 不限次文件不再逐次写计数 —');

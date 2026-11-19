@@ -2,7 +2,7 @@
 // 后端用 R2 HEAD 校验对象确实存在且大小与声明一致，才把状态从 pending 改为 ready。
 // 幂等：已经是 ready 的重复调用直接返回成功。
 
-import { json, fail, readJson, nowSec } from '../_lib/http.js';
+import { json, fail, readJson, nowSec, hitRateLimit } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
 import { UPLOAD_URL_TTL_SEC } from '../_lib/consts.js';
 
@@ -20,6 +20,13 @@ export async function onRequest(context) {
   }
   const id = String(body.id || '');
   if (!/^[0-9a-f]{32}$/.test(id)) return fail('bad_id', '链接 ID 不合法', 400);
+
+  // 轻量限流：同一 IP 每小时最多确认 60 次（正常上传确认只需 1 次，含重试
+  // 也绰绰有余），防拿随机 ID 反复撞本接口刷 D1/R2。计数失败关门回 503，
+  // 与 upload-init 的限流口径一致，不 fail-open。
+  const rl = await hitRateLimit(env, request, 'complete', 60);
+  if (rl === false) return fail('rate_limited', '操作太频繁，请稍后再试', 429);
+  if (rl === null) return fail('rate_limit_failed', '服务暂时不可用（限流计数失败），请稍后再试', 503);
 
   const row = await first(env, 'SELECT * FROM files WHERE id = ?', id);
   if (!row) return fail('not_found', '找不到这个上传', 404);
@@ -43,9 +50,14 @@ export async function onRequest(context) {
   const shift = Math.min(Math.max(0, now - row.created_at), UPLOAD_URL_TTL_SEC);
   const newExpiresAt = row.expires_at + shift;
   if (newExpiresAt <= now) {
-    // 位移后仍过期（异常行）：当场删对象 + 删记录，不等 cleanup 兜底
-    try { await env.FILES.delete(row.r2_key); } catch { /* 删除失败由 cleanup 兜底 */ }
-    try { await run(env, 'DELETE FROM files WHERE id = ?', id); } catch { /* 同上 */ }
+    // 位移后仍过期（异常行）：与 cleanup 同语义——先删 R2 对象，删成功
+    // 才删记录；对象删失败时保留记录，等定时清理重试。记录先删掉的话
+    // cleanup 就无从查起，对象只能等 R2 桶生命周期兜底、成孤儿。
+    let objectDeleted = true;
+    try { await env.FILES.delete(row.r2_key); } catch { objectDeleted = false; }
+    if (objectDeleted) {
+      try { await run(env, 'DELETE FROM files WHERE id = ?', id); } catch { /* 记录没删掉，下次清理再清 */ }
+    }
     return fail('expired', '这个上传已过期', 410);
   }
 
@@ -59,6 +71,15 @@ export async function onRequest(context) {
     return fail('size_mismatch', `文件大小不一致（应为 ${row.size_bytes} 字节，实际 ${head.size} 字节），请重新上传`, 400);
   }
 
-  await run(env, "UPDATE files SET status = 'ready', expires_at = ? WHERE id = ? AND status = 'pending'", newExpiresAt, id);
+  const upd = await run(env, "UPDATE files SET status = 'ready', expires_at = ? WHERE id = ? AND status = 'pending'", newExpiresAt, id);
+  // 并发 complete：若本次 UPDATE 没改到行（changes=0），说明另一个请求已
+  // 先转 ready 并写了它的到期时间——回读库里的真实值返回，不拿本地算的
+  // newExpiresAt 冒充，避免返回值与库内不一致。
+  if (upd && upd.meta && upd.meta.changes === 0) {
+    const fresh = await first(env, 'SELECT * FROM files WHERE id = ?', id);
+    if (fresh && fresh.status === 'ready') {
+      return json({ id, download_url: downloadUrl, expires_at: fresh.expires_at, max_downloads: fresh.max_downloads, name: fresh.orig_name, size: fresh.size_bytes });
+    }
+  }
   return json({ id, download_url: downloadUrl, expires_at: newExpiresAt, max_downloads: row.max_downloads, name: row.orig_name, size: row.size_bytes });
 }

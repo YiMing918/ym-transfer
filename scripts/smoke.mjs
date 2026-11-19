@@ -319,7 +319,7 @@ await test('密钥不对/缺失 → 401', async () => {
   const r2 = await callHandler(cleanupApi, { method: 'POST', url: 'http://localhost/api/cleanup', headers: {}, env: mock.env, waitUntil: mock.waitUntil });
   eq(r2.res.status, 401);
 });
-await test('正确密钥：删过期 ready、过期 pending、超时 pending；保留新鲜的', async () => {
+await test('正确密钥：删过期 ready、超时 pending；保留新鲜的与尚在上传窗口内的 pending（哪怕其短有效期已过）', async () => {
   const mock = freshEnv();
   insertFileRow(mock, { id: '1'.repeat(32), r2Key: 'f/2026/11/111', size: 100, status: 'ready', expiresInSec: -10 });
   insertFileRow(mock, { id: '2'.repeat(32), r2Key: 'f/2026/11/222', size: 100, status: 'pending', expiresInSec: -10 });
@@ -329,10 +329,13 @@ await test('正确密钥：删过期 ready、过期 pending、超时 pending；�
   for (const k of ['111', '222', '333', '444', '555']) await mock.env.FILES.put('f/2026/11/' + k, Buffer.alloc(100, 2));
   const r = await callHandler(cleanupApi, { method: 'POST', url: 'http://localhost/api/cleanup', headers: { 'X-Task-Secret': 'test-task-secret' }, env: mock.env, waitUntil: mock.waitUntil });
   eq(r.res.status, 200);
-  eq(r.json.data.deleted, 3, '应删 3 个');
-  for (const k of ['111', '222', '333']) eq(await mock.env.FILES.head('f/2026/11/' + k), null, `R2 对象 ${k} 应被删`);
-  for (const k of ['444', '555']) ok(await mock.env.FILES.head('f/2026/11/' + k), `R2 对象 ${k} 应保留`);
-  eq(mock.env.DB.prepare('SELECT COUNT(*) AS n FROM files').first().n, 2, 'D1 应剩 2 行');
+  // 222 是 pending 且有效期已过、但创建时间还新（尚在 6 小时上传窗口内）：
+  // v1.1.5 起 cleanup 第一分支只管 ready，pending 一律等 PENDING_TTL 超时
+  // 才清，否则慢传大文件会被中途误删——本轮应保留 222。
+  eq(r.json.data.deleted, 2, '应删 2 个（过期 ready + 超时 pending）');
+  for (const k of ['111', '333']) eq(await mock.env.FILES.head('f/2026/11/' + k), null, `R2 对象 ${k} 应被删`);
+  for (const k of ['222', '444', '555']) ok(await mock.env.FILES.head('f/2026/11/' + k), `R2 对象 ${k} 应保留`);
+  eq(mock.env.DB.prepare('SELECT COUNT(*) AS n FROM files').first().n, 3, 'D1 应剩 3 行');
 });
 
 console.log('— 统计 /api/stats —');

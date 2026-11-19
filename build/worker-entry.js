@@ -58,7 +58,15 @@ export default {
     // 原样用它；非 GET/HEAD 它会错误地回落首页，故在这里按原版口径回 405
     // （带平台默认的 Referrer-Policy 头）。
     if (request.method === 'GET' || request.method === 'HEAD') {
-      return env.ASSETS.fetch(request);
+      // 静态响应补基础安全头：高级模式下 public/_headers 不一定生效，
+      // 在这里给资产响应统一加上，与函数层 http.js 的口径一致。
+      const res = await env.ASSETS.fetch(request);
+      const headers = new Headers(res.headers);
+      headers.set('X-Content-Type-Options', 'nosniff');
+      headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+      headers.set('X-Frame-Options', 'DENY');
+      headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
     }
     return new Response(null, {
       status: 405,

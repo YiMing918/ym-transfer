@@ -4,7 +4,7 @@
 import { json, fail, readJson, nowSec, ipHash, randomToken, HttpError } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
 import { presignPut, newObjectKey } from '../_lib/r2sign.js';
-import { MAX_FILE_BYTES, TOTAL_CAP_BYTES, UPLOAD_URL_TTL_SEC, PENDING_TTL_SEC } from '../_lib/consts.js';
+import { MAX_FILE_BYTES, TOTAL_CAP_BYTES, UPLOAD_URL_TTL_SEC, PENDING_TTL_SEC, PENDING_CAP_BYTES } from '../_lib/consts.js';
 
 export { MAX_FILE_BYTES, TOTAL_CAP_BYTES };
 const RATE_LIMIT_PER_HOUR = 10;                            // 同一 IP 每小时最多创建 10 次上传
@@ -12,7 +12,10 @@ const RATE_LIMIT_PER_HOUR = 10;                            // 同一 IP 每小�
 function cleanFileName(name) {
   let n = String(name ?? '未命名文件').replace(/[\u0000-\u001f\u007f]/g, '').replace(/[\\/]/g, '_').trim();
   if (!n) n = '未命名文件';
-  if (n.length > 200) n = n.slice(0, 200);
+  // 按码点截断：用 length/slice 按 UTF-16 码元切，会把 Emoji 等代理对从中间
+  // 切断、留半个坏字符；展开成码点数组再截就不会。
+  const chars = [...n];
+  if (chars.length > 200) n = chars.slice(0, 200).join('');
   return n;
 }
 
@@ -30,10 +33,9 @@ function cleanMime(mime) {
 
 // pending 占额封顶（C-12）：pending 只是「声明要传」还没传一字节，空声明
 // 若按声明大小全额占容量，刷一批 pending 就能把全站 10GB 堵死。口径：
-// usedBytes 里 pending 部分最多计总盘的 1/3，ready 全额计。正常慢传不受
-// 影响——文件照样能建、照样传，封顶只影响「pending 能替别人堵多少容量」。
-const PENDING_CAP_BYTES = Math.floor(TOTAL_CAP_BYTES / 3);
-
+// usedBytes 里 pending 部分最多计总盘的 1/3（PENDING_CAP_BYTES，定义在
+// consts.js、stats 共用同一口径），ready 全额计。正常慢传不受影响——
+// 文件照样能建、照样传，封顶只影响「pending 能替别人堵多少容量」。
 // 站内已用字节：未过期的 ready（全额）+ 保留期内新建的 pending（封顶
 // PENDING_CAP_BYTES；超时 pending 不占容量，等清理删）
 async function usedBytes(env, now) {
@@ -106,7 +108,7 @@ export async function onRequest(context) {
     return fail('rate_limit_failed', '服务暂时不可用（限流计数失败），请稍后再试', 503);
   }
   if (rlRow.count > RATE_LIMIT_PER_HOUR) {
-    try { await run(env, 'UPDATE rate_limits SET count = count - 1 WHERE bucket = ? AND window_start = ?', bucket, windowStart); } catch { /* 回滚失败由旧行 7 天清理兜底 */ }
+    try { await run(env, 'UPDATE rate_limits SET count = count - 1 WHERE bucket = ? AND window_start = ? AND count > 0', bucket, windowStart); } catch { /* 回滚失败由旧行 7 天清理兜底 */ }
     return fail('rate_limited', '操作太频繁，请稍后再试', 429);
   }
 
@@ -129,9 +131,11 @@ export async function onRequest(context) {
   try {
     signed = await presignPut(env, r2Key, mime, UPLOAD_URL_TTL_SEC, new Date(), size);
   } catch (e) {
-    // 签发失败：删掉刚建的 pending 行，不占容量
+    // 签发失败：删掉刚建的 pending 行，不占容量。内部错误细节只记日志、
+    // 不回吐给请求方（可能带凭据配置等内部信息）。
+    console.error('presignPut failed:', e);
     await run(env, 'DELETE FROM files WHERE id = ?', id);
-    return fail('sign_failed', '签发上传地址失败：' + e.message, 500);
+    return fail('sign_failed', '签发上传地址失败，请稍后再试', 500);
   }
 
   const base = new URL(request.url);
@@ -143,7 +147,7 @@ export async function onRequest(context) {
     download_url: `${base.origin}/d/${id}`,
     expires_at: expiresAt,
     max_downloads: maxDownloads,
-    used_bytes: used,
+    used_bytes: usedAfter,
     total_cap_bytes: TOTAL_CAP_BYTES,
     max_file_bytes: MAX_FILE_BYTES,
   });

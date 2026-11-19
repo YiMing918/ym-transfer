@@ -13,3 +13,9 @@ export const UPLOAD_URL_TTL_SEC = 6 * 3600;             // 上传地址有效 6 
 // 传完的对象成无记录孤儿、还不计入容量统计）
 export const PENDING_TTL_SEC = UPLOAD_URL_TTL_SEC + 600;
 export const PRESIGN_GET_TTL_SEC = 3600;                // 下载直链有效 1 小时（且不超过分享剩余有效期）
+// pending 占额封顶（配额统一口径，upload-init 与 stats 共用同一份）：
+// pending 只是「声明要传」还没传完，空声明若按声明大小全额占容量，刷一批
+// pending 就能把全站 10GB 堵死；故已用量里 pending 部分最多计总盘的 1/3，
+// ready 全额计。upload-init 的准入判断与 stats 的对外展示都用这个口径，
+// 不再各算各的（此前 stats 用无封顶 SUM、init 用封顶口径，两边对不上）。
+export const PENDING_CAP_BYTES = Math.floor(TOTAL_CAP_BYTES / 3);
