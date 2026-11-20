@@ -1,6 +1,8 @@
 // test-c-fixes.mjs — 对抗复读 C 部分定向测试（C-1 / C-11 / C-12 / C-34 / C-35 / C-42）
 // 用法：node scripts/test-c-fixes.mjs；任一失败即 exit 1。
 import assert from 'node:assert';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createMockEnv, callHandler } from './mock.mjs';
 import { presignPut } from '../functions/_lib/r2sign.js';
 import { TOTAL_CAP_BYTES } from '../functions/_lib/consts.js';
@@ -199,6 +201,62 @@ await test('presignPut：脏 contentType 进签名串前被清掉控制字符', 
   const mock = createMockEnv();
   const s = await presignPut(mock.env, 'f/2026/11/zzz', 'text/plain\r\nX-Evil: 1', 600, new Date('2026-11-10T00:00:00.000Z'));
   ok(!/[\u0000-\u001f\u007f]/.test(s.headers['Content-Type']), `签名头不应含控制字符，实际 ${JSON.stringify(s.headers['Content-Type'])}`);
+});
+
+console.log('— 指纹（v1.1.8）：complete 存 content_md5 并带回 —');
+async function completeFile(mock, id, token) {
+  return callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id, delete_token: token }, env: mock.env, waitUntil: mock.waitUntil });
+}
+await test('确认后指纹落库、响应带回，重复确认也带回', async () => {
+  const mock = createMockEnv();
+  const body = Buffer.alloc(1000, 7);
+  const expectMd5 = createHash('md5').update(body).digest('hex');
+  const init = await initFile(mock, { size: 1000 });
+  const id = init.json.data.id;
+  const stagingKey = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first().r2_key;
+  await mock.env.FILES.put(stagingKey, body);
+  const r = await completeFile(mock, id, init.json.data.delete_token);
+  eq(r.res.status, 200);
+  eq(r.json.data.content_md5, expectMd5, '响应应带回内容指纹');
+  const row = mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(id).first();
+  eq(row.status, 'ready');
+  eq(row.content_md5, expectMd5, '指纹应落库');
+  const again = await completeFile(mock, id, init.json.data.delete_token);
+  eq(again.res.status, 200);
+  eq(again.json.data.content_md5, expectMd5, '重复确认应从库里带回指纹');
+});
+await test('老式键（非临时键）确认也存指纹', async () => {
+  const mock = createMockEnv();
+  const body = Buffer.alloc(500, 3);
+  const expectMd5 = createHash('md5').update(body).digest('hex');
+  const id = 'c'.repeat(32);
+  insertFileRow(mock, { id, r2Key: 'f/2026/11/legacy-md5', size: 500, status: 'pending' });
+  await mock.env.FILES.put('f/2026/11/legacy-md5', body);
+  const r = await callHandler(uploadComplete, { method: 'POST', url: 'http://localhost/api/upload-complete', headers: apiHeaders(), body: { id }, env: mock.env, waitUntil: mock.waitUntil });
+  eq(r.res.status, 200);
+  eq(r.json.data.content_md5, expectMd5);
+  eq(mock.env.DB.prepare('SELECT content_md5 FROM files WHERE id = ?').bind(id).first().content_md5, expectMd5);
+});
+await test('etag 取不到时确认照常成功、不带指纹、库里留空', async () => {
+  const mock = createMockEnv();
+  const init = await initFile(mock, { size: 1000 });
+  const id = init.json.data.id;
+  const stagingKey = mock.env.DB.prepare('SELECT r2_key FROM files WHERE id = ?').bind(id).first().r2_key;
+  await mock.env.FILES.put(stagingKey, Buffer.alloc(1000, 7));
+  // 把 head 的 etag 抹掉，模拟取不到指纹的存储形态
+  const origHead = mock.env.FILES.head.bind(mock.env.FILES);
+  mock.env.FILES.head = async (key) => { const h = await origHead(key); return h ? { key: h.key, size: h.size } : null; };
+  const r = await completeFile(mock, id, init.json.data.delete_token);
+  eq(r.res.status, 200, '没指纹不许把确认打成失败');
+  ok(!('content_md5' in r.json.data), '响应不应带指纹字段');
+  const row = mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(id).first();
+  eq(row.status, 'ready');
+  eq(row.content_md5, null, '库里应留空');
+});
+await test('前端结果面板接了指纹显示（源码接线）', async () => {
+  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+  ok(html.includes('文件指纹（MD5）：'), '结果面板应有指纹行文案');
+  ok(html.includes('j.data.content_md5'), '上传完成回调应把响应指纹传给结果面板');
 });
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);

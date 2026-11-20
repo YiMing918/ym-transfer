@@ -28,11 +28,11 @@ Cloudflare 后台 → D1 SQL 数据库 → 创建数据库：
 - 名称：`ym-transfer-db`
 - 记下数据库 ID（后面要用）。
 
-建表（二选一，迁移文件按顺序跑，先 0001 再 0002 再 0003 再 0004）：
+建表（二选一，迁移文件按顺序跑，先 0001 再 0002 再 0003 再 0004 再 0005）：
 
-- 方法一（面板）：进数据库 → 控制台 → 先粘贴 `schema/0001_init.sql` 全文执行，再粘贴 `schema/0002_add_max_downloads.sql` 全文执行，再粘贴 `schema/0003_drop_redundant_index.sql` 全文执行，最后粘贴 `schema/0004_add_delete_token.sql` 全文执行。
-- 方法二（命令行）：`npx wrangler d1 execute ym-transfer-db --remote --file=schema/0001_init.sql`，再跑一次 `--file=schema/0002_add_max_downloads.sql`，再跑 `--file=schema/0003_drop_redundant_index.sql`，最后一遍 `--file=schema/0004_add_delete_token.sql`。
-- 表结构用 `IF NOT EXISTS`，重复执行没事。**0002 是下载次数上限那列（max_downloads），不跑它，选了下载次数的上传会报错。0004 是删除令牌那列，不跑它删除令牌功能不生效（其余功能不受影响，代码有兜底）。**
+- 方法一（面板）：进数据库 → 控制台 → 先粘贴 `schema/0001_init.sql` 全文执行，再粘贴 `schema/0002_add_max_downloads.sql` 全文执行，再粘贴 `schema/0003_drop_redundant_index.sql` 全文执行，再粘贴 `schema/0004_add_delete_token.sql` 全文执行，最后粘贴 `schema/0005_add_content_md5.sql` 全文执行。
+- 方法二（命令行）：`npx wrangler d1 execute ym-transfer-db --remote --file=schema/0001_init.sql`，再跑一次 `--file=schema/0002_add_max_downloads.sql`，再跑 `--file=schema/0003_drop_redundant_index.sql`，再跑 `--file=schema/0004_add_delete_token.sql`，最后一遍 `--file=schema/0005_add_content_md5.sql`。
+- 表结构用 `IF NOT EXISTS`，重复执行没事。**0002 是下载次数上限那列（max_downloads），不跑它，选了下载次数的上传会报错。0004 是删除令牌那列，不跑它删除令牌功能不生效（其余功能不受影响，代码有兜底）。0005 是文件指纹那列（content_md5），不跑它就没有指纹可显示（其余功能不受影响，代码有兜底）。**
 
 ## 3. 建 R2 的 S3 API 令牌（签发预签名 URL 用）
 

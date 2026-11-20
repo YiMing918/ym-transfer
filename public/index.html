@@ -282,10 +282,10 @@ function setProgress(loaded, total, startedAt){
   }
 }
 
-function showResult(link, expiresAt, name, size, maxDl, token){
+function showResult(link, expiresAt, name, size, maxDl, token, md5){
   progressBox.style.display = 'none';
   linkInput.value = link;
-  resultMeta.innerHTML = '文件：' + escapeHtml(name) + '（' + fmtSize(size) + '）<br>链接有效期到：' + fmtDate(expiresAt) + '，到期自动删除<br>' + (maxDl ? '最多可领取下载 ' + maxDl + ' 次（每次领到的直链 5 分钟内有效），达到次数后链接失效、文件随后删除' : '下载次数不限');
+  resultMeta.innerHTML = '文件：' + escapeHtml(name) + '（' + fmtSize(size) + '）<br>链接有效期到：' + fmtDate(expiresAt) + '，到期自动删除<br>' + (maxDl ? '最多可领取下载 ' + maxDl + ' 次（每次领到的直链 5 分钟内有效），达到次数后链接失效、文件随后删除' : '下载次数不限') + (md5 ? '<br>文件指纹（MD5）：' + escapeHtml(md5) : '');
   if (token){
     tokenInput.value = token;
     tokenBox.style.display = 'block';
@@ -339,7 +339,7 @@ function uploadReal(){
         }).then(function(r){ return jsonOrErr(r); }).then(function(j){
           uploading = false;
           if (j.ok){
-            showResult(j.data.download_url, j.data.expires_at, j.data.name, j.data.size, j.data.max_downloads, d.delete_token);
+            showResult(j.data.download_url, j.data.expires_at, j.data.name, j.data.size, j.data.max_downloads, d.delete_token, j.data.content_md5);
           } else {
             throw new Error(j.error ? j.error.message : '确认上传失败');
           }

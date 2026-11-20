@@ -8,11 +8,31 @@
 // 有效期 6 小时）再 PUT 也只能写已废弃的临时位置，覆盖不了正式文件。
 // 存量老上传（升级部署瞬间还在传的 pending，r2_key 是旧式 f/… 键、对象
 // 就在正式位置）走原路径直接转 ready，不复制、不打断。
+// v1.1.8：转 ready 时顺手把对象的 etag 存进 content_md5（单次 PUT 的
+// etag 即内容 MD5，见 md5FromEtag）并在响应里带回，前端结果面板显示
+// 一行指纹供核对；取不到或写不进（0005 没跑的老库）都留空，不影响确认。
 
 import { json, fail, readJson, nowSec, hitRateLimit, tokenHashMatches } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
 import { UPLOAD_URL_TTL_SEC } from '../_lib/consts.js';
 import { isStagingKey, finalKeyForStaging, s3CopyObject } from '../_lib/r2sign.js';
+
+// 从 R2 对象 etag 里取内容指纹：单次预签名 PUT 的对象 etag 就是内容
+// MD5（32 位十六进制，绑定给的 etag 不带引号、httpEtag 带引号，两
+// 种都剥掉再验格式）。多段上传的 etag 带「-段数」后缀、对不上格式，
+// 一律当没取到返回 null——留空不显示，胜过存个错指纹误导核对。
+function md5FromEtag(etag) {
+  const s = String(etag ?? '').replace(/["\s]/g, '').toLowerCase();
+  return /^[0-9a-f]{32}$/.test(s) ? s : null;
+}
+
+// 指纹落库只是尽力而为：0005 迁移没跑的库没有 content_md5 列，写入
+// 会抛错——吞掉。确认成功与否只看原有的大小校验，指纹缺失不许把
+// complete 打成失败（与删除令牌「没跑迁移就不生效、其余照旧」同口径）。
+async function saveContentMd5(env, id, md5) {
+  if (!md5) return;
+  try { await run(env, 'UPDATE files SET content_md5 = ? WHERE id = ?', md5, id); } catch { /* 老库没这列：跳过 */ }
+}
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -53,7 +73,9 @@ export async function onRequest(context) {
   const base = new URL(request.url);
   const downloadUrl = `${base.origin}/d/${id}`;
   if (row.status === 'ready') {
-    return json({ id, download_url: downloadUrl, expires_at: row.expires_at, max_downloads: row.max_downloads, name: row.orig_name, size: row.size_bytes });
+    // 幂等重确认：存过指纹就一并带回（老文件没存过则不带这个字段）
+    const savedMd5 = md5FromEtag(row.content_md5);
+    return json({ id, download_url: downloadUrl, expires_at: row.expires_at, max_downloads: row.max_downloads, name: row.orig_name, size: row.size_bytes, ...(savedMd5 ? { content_md5: savedMd5 } : {}) });
   }
   if (row.status !== 'pending') return fail('bad_status', '这个上传已失效', 410);
 
@@ -117,31 +139,39 @@ export async function onRequest(context) {
       try { await env.FILES.delete(finalKey); } catch { /* 坏复制删不掉时由清理兜底 */ }
       return fail('copy_failed', '文件确认失败（转存校验没过），请稍后重试确认，不用重新上传', 500);
     }
+    // 指纹取正式对象的 etag（复制不改字节，与临时对象同一份内容）
+    const contentMd5 = md5FromEtag(finalHead.etag);
     // 先把记录转 ready 并把 r2_key 换成正式键，再删临时对象：顺序反过来
     // （先删临时、后改记录）一旦改记录失败，记录会指着已删的临时键、
     // 正式对象反而成了无记录孤儿。临时对象删失败不阻塞成功返回——它已
     // 不被任何记录引用，删文件的各路径会顺手再删一次（见 delete/cleanup），
     // 最终还有 R2 桶 10 天生命周期兜底。
     const upd2 = await run(env, "UPDATE files SET status = 'ready', expires_at = ?, r2_key = ? WHERE id = ? AND status = 'pending'", newExpiresAt, finalKey, id);
+    await saveContentMd5(env, id, contentMd5);
     try { await env.FILES.delete(stagingKey); } catch { /* 残留临时对象由删文件路径顺手清 + 生命周期兜底 */ }
     if (upd2 && upd2.meta && upd2.meta.changes === 0) {
       const fresh = await first(env, 'SELECT * FROM files WHERE id = ?', id);
       if (fresh && fresh.status === 'ready') {
-        return json({ id, download_url: downloadUrl, expires_at: fresh.expires_at, max_downloads: fresh.max_downloads, name: fresh.orig_name, size: fresh.size_bytes });
+        const freshMd5 = md5FromEtag(fresh.content_md5) || contentMd5;
+        return json({ id, download_url: downloadUrl, expires_at: fresh.expires_at, max_downloads: fresh.max_downloads, name: fresh.orig_name, size: fresh.size_bytes, ...(freshMd5 ? { content_md5: freshMd5 } : {}) });
       }
     }
-    return json({ id, download_url: downloadUrl, expires_at: newExpiresAt, max_downloads: row.max_downloads, name: row.orig_name, size: row.size_bytes });
+    return json({ id, download_url: downloadUrl, expires_at: newExpiresAt, max_downloads: row.max_downloads, name: row.orig_name, size: row.size_bytes, ...(contentMd5 ? { content_md5: contentMd5 } : {}) });
   }
 
+  // 老路径（存量旧式键）：指纹取这份已验过大小的对象的 etag
+  const contentMd5 = md5FromEtag(head.etag);
   const upd = await run(env, "UPDATE files SET status = 'ready', expires_at = ? WHERE id = ? AND status = 'pending'", newExpiresAt, id);
+  await saveContentMd5(env, id, contentMd5);
   // 并发 complete：若本次 UPDATE 没改到行（changes=0），说明另一个请求已
   // 先转 ready 并写了它的到期时间——回读库里的真实值返回，不拿本地算的
   // newExpiresAt 冒充，避免返回值与库内不一致。
   if (upd && upd.meta && upd.meta.changes === 0) {
     const fresh = await first(env, 'SELECT * FROM files WHERE id = ?', id);
     if (fresh && fresh.status === 'ready') {
-      return json({ id, download_url: downloadUrl, expires_at: fresh.expires_at, max_downloads: fresh.max_downloads, name: fresh.orig_name, size: fresh.size_bytes });
+      const freshMd5 = md5FromEtag(fresh.content_md5) || contentMd5;
+      return json({ id, download_url: downloadUrl, expires_at: fresh.expires_at, max_downloads: fresh.max_downloads, name: fresh.orig_name, size: fresh.size_bytes, ...(freshMd5 ? { content_md5: freshMd5 } : {}) });
     }
   }
-  return json({ id, download_url: downloadUrl, expires_at: newExpiresAt, max_downloads: row.max_downloads, name: row.orig_name, size: row.size_bytes });
+  return json({ id, download_url: downloadUrl, expires_at: newExpiresAt, max_downloads: row.max_downloads, name: row.orig_name, size: row.size_bytes, ...(contentMd5 ? { content_md5: contentMd5 } : {}) });
 }

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>YM 传文件 · 免费传文件，不用注册</title>
 <meta name="description" content="YM 传文件：浏览器里直接传文件，不用注册、不用装 App，传完给一个下载链接，过期自动删除。单文件最大 5GB。">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📤</text></svg>">
@@ -282,10 +282,10 @@ function setProgress(loaded, total, startedAt){
   }
 }
 
-function showResult(link, expiresAt, name, size, maxDl, token){
+function showResult(link, expiresAt, name, size, maxDl, token, md5){
   progressBox.style.display = 'none';
   linkInput.value = link;
-  resultMeta.innerHTML = '文件：' + escapeHtml(name) + '（' + fmtSize(size) + '）<br>链接有效期到：' + fmtDate(expiresAt) + '，到期自动删除<br>' + (maxDl ? '最多可领取下载 ' + maxDl + ' 次（每次领到的直链 5 分钟内有效），达到次数后链接失效、文件随后删除' : '下载次数不限');
+  resultMeta.innerHTML = '文件：' + escapeHtml(name) + '（' + fmtSize(size) + '）<br>链接有效期到：' + fmtDate(expiresAt) + '，到期自动删除<br>' + (maxDl ? '最多可领取下载 ' + maxDl + ' 次（每次领到的直链 5 分钟内有效），达到次数后链接失效、文件随后删除' : '下载次数不限') + (md5 ? '<br>文件指纹（MD5）：' + escapeHtml(md5) : '');
   if (token){
     tokenInput.value = token;
     tokenBox.style.display = 'block';
@@ -339,7 +339,7 @@ function uploadReal(){
         }).then(function(r){ return jsonOrErr(r); }).then(function(j){
           uploading = false;
           if (j.ok){
-            showResult(j.data.download_url, j.data.expires_at, j.data.name, j.data.size, j.data.max_downloads, d.delete_token);
+            showResult(j.data.download_url, j.data.expires_at, j.data.name, j.data.size, j.data.max_downloads, d.delete_token, j.data.content_md5);
           } else {
             throw new Error(j.error ? j.error.message : '确认上传失败');
           }

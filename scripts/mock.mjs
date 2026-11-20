@@ -2,6 +2,7 @@
 // D1 用 Node 内置 node:sqlite 真跑 SQL（D1 本身就是 SQLite，行为最接近）；
 // R2 用内存 Map；waitUntil 收集起来由测试统一等。
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -50,7 +51,13 @@ export function createMockR2(store = new Map()) {
     _store: store,
     async head(key) {
       const o = store.get(key);
-      return o ? { key, size: o.size, etag: '"mock-etag"' } : null;
+      if (!o) return null;
+      // 真 R2 里单次 PUT 对象的 etag 就是内容 MD5（带引号的十六进制），
+      // 照真形态给：只给假字符串的话，「按 etag 存指纹」这类代码在本地
+      // 永远测不出真效果（v1.1.8 起 complete 会读它）。没 body 的老数据
+      // 才回落到原来的占位 etag。
+      const etag = o.body ? '"' + createHash('md5').update(o.body).digest('hex') + '"' : '"mock-etag"';
+      return { key, size: o.size, etag };
     },
     async put(key, value) {
       const buf = Buffer.isBuffer(value) ? value : Buffer.from(value);
