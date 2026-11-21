@@ -74,6 +74,7 @@ jobs:
           schema/0002_add_max_downloads.sql
           schema/0003_drop_redundant_index.sql
           schema/0004_add_delete_token.sql
+          schema/0005_add_content_md5.sql
           wrangler.toml.example
           PACKLIST
           find stage -type f -exec touch -d '1980-01-01 00:00:00' {} +
@@ -99,6 +100,7 @@ jobs:
           rm -rf wstage && mkdir wstage
           cp _worker.js wstage/
           cp public/index.html wstage/index.html
+          cp public/_headers wstage/
           find wstage -type f -exec touch -d '1980-01-01 00:00:00' {} +
           cd wstage
           find . -type f | sed 's|^\./||' | LC_ALL=C sort | zip -q -X -D "../$WZIPNAME" -@
