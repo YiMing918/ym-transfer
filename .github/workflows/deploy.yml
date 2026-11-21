@@ -38,29 +38,29 @@ jobs:
       - name: 执行 D1 迁移（建表，IF NOT EXISTS，已建过可重复跑）
         if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' }}
         run: |
-          npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0001_init.sql
-          # 0002 加一列 max_downloads：只容忍「列已存在」（已迁移过），其他失败必须让部署红灯，
-          # 不许再无条件吞掉（旧写法把真失败也当成功，迁移没跑成却照常上线）
-          if ! out=$(npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0002_add_max_downloads.sql 2>&1); then
-            echo "$out"
-            if echo "$out" | grep -qi 'duplicate column'; then
-              echo "0002 已执行过（列已存在），继续"
-            else
-              echo "::error::0002 迁移失败（非列已存在），终止部署，请先处理 D1 迁移"
-              exit 1
+          # 加列迁移（0002/0004/0005）统一走这个函数：先跑 ALTER，失败了不猜报错文案，
+          # 直接拿 SELECT 列名探一下——列在就是已迁移过，放行；列不在才是真失败，红灯停下。
+          # 这样 wrangler 换个报错写法也不会再误杀部署，真失败也不会被悄悄吞掉。
+          add_column_if_missing() { # $1 迁移文件 $2 表名 $3 列名 $4 编号
+            if ! out=$(npx -y wrangler@3 d1 execute ym-transfer-db --remote --file="$1" 2>&1); then
+              echo "$out"
+              if npx -y wrangler@3 d1 execute ym-transfer-db --remote --command "SELECT $3 FROM $2 LIMIT 0;" >/dev/null 2>&1; then
+                echo "$4 已执行过（列已存在），继续"
+              else
+                echo "::error::$4 迁移失败（列也不存在），终止部署，请先处理 D1 迁移"
+                exit 1
+              fi
             fi
-          fi
+          }
+          npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0001_init.sql
+          # 0002 加一列 max_downloads（下载次数上限）
+          add_column_if_missing schema/0002_add_max_downloads.sql files max_downloads 0002
           # 0003 删冗余索引：DROP INDEX IF EXISTS 本身幂等，可重复跑
           npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0003_drop_redundant_index.sql
-          if ! out=$(npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0004_add_delete_token.sql 2>&1); then
-            echo "$out"
-            if echo "$out" | grep -qi 'duplicate column'; then
-              echo "0004 已执行过（列已存在），继续"
-            else
-              echo "::error::0004 迁移失败（非列已存在），终止部署，请先处理 D1 迁移"
-              exit 1
-            fi
-          fi
+          # 0004 加一列 delete_token_hash（删除令牌）
+          add_column_if_missing schema/0004_add_delete_token.sql files delete_token_hash 0004
+          # 0005 加一列 content_md5（文件指纹）
+          add_column_if_missing schema/0005_add_content_md5.sql files content_md5 0005
       - name: 推送 Pages 加密变量（Secret 逐个灌入，缺哪个跳哪个）
         # 首次运行时项目还不存在（由下一步的部署创建），本步会失败但不许中断：continue-on-error 放行，
         # 部署建好项目后手动再跑一次本工作流，密钥灌入后随第二次部署生效。
