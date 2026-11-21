@@ -7,6 +7,7 @@
 #   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID  —— 部署令牌与账号（必填，缺了整条流水线自动跳过）
 #   R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY       —— R2 桶的 S3 凭据（运行时 Secret，直传必需）
 #   TASK_SECRET                                   —— 清理接口密钥（运行时 Secret，清理工作流也用它）
+# 部署工具 wrangler 的版本由仓库 package-lock.json 锁定（下面的 npm ci 按锁安装），不再现拉浮动版。
 
 
 on:
@@ -29,6 +30,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: 按锁文件装部署工具（版本跟仓库走）
+        run: npm ci --no-audit --no-fund
       - name: 跑全套测试（不过不部署）
         if: ${{ env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' }}
         run: npm test
@@ -42,9 +45,9 @@ jobs:
           # 直接拿 SELECT 列名探一下——列在就是已迁移过，放行；列不在才是真失败，红灯停下。
           # 这样 wrangler 换个报错写法也不会再误杀部署，真失败也不会被悄悄吞掉。
           add_column_if_missing() { # $1 迁移文件 $2 表名 $3 列名 $4 编号
-            if ! out=$(npx -y wrangler@3 d1 execute ym-transfer-db --remote --file="$1" 2>&1); then
+            if ! out=$(./node_modules/.bin/wrangler d1 execute ym-transfer-db --remote --file="$1" 2>&1); then
               echo "$out"
-              if npx -y wrangler@3 d1 execute ym-transfer-db --remote --command "SELECT $3 FROM $2 LIMIT 0;" >/dev/null 2>&1; then
+              if ./node_modules/.bin/wrangler d1 execute ym-transfer-db --remote --command "SELECT $3 FROM $2 LIMIT 0;" >/dev/null 2>&1; then
                 echo "$4 已执行过（列已存在），继续"
               else
                 echo "::error::$4 迁移失败（列也不存在），终止部署，请先处理 D1 迁移"
@@ -52,11 +55,11 @@ jobs:
               fi
             fi
           }
-          npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0001_init.sql
+          ./node_modules/.bin/wrangler d1 execute ym-transfer-db --remote --file=schema/0001_init.sql
           # 0002 加一列 max_downloads（下载次数上限）
           add_column_if_missing schema/0002_add_max_downloads.sql files max_downloads 0002
           # 0003 删冗余索引：DROP INDEX IF EXISTS 本身幂等，可重复跑
-          npx -y wrangler@3 d1 execute ym-transfer-db --remote --file=schema/0003_drop_redundant_index.sql
+          ./node_modules/.bin/wrangler d1 execute ym-transfer-db --remote --file=schema/0003_drop_redundant_index.sql
           # 0004 加一列 delete_token_hash（删除令牌）
           add_column_if_missing schema/0004_add_delete_token.sql files delete_token_hash 0004
           # 0005 加一列 content_md5（文件指纹）
@@ -76,11 +79,11 @@ jobs:
               echo "跳过 $1（未配置）"
               return 0
             fi
-            if out=$(printf '%s' "$2" | npx -y wrangler@3 pages secret put "$1" --project-name ym-transfer 2>&1); then
+            if out=$(printf '%s' "$2" | ./node_modules/.bin/wrangler pages secret put "$1" --project-name ym-transfer 2>&1); then
               echo "$1 已灌入"
             else
               echo "$out"
-              if npx -y wrangler@3 pages project list 2>/dev/null | grep -q "ym-transfer"; then
+              if ./node_modules/.bin/wrangler pages project list 2>/dev/null | grep -q "ym-transfer"; then
                 echo "::error::$1 灌入失败（项目已存在，不是首次运行），终止部署，请先处理密钥灌入"
                 exit 1
               fi
@@ -96,4 +99,4 @@ jobs:
           rm -rf _site && mkdir _site
           cp -r public/. _site/
           cp -r functions _site/functions
-          npx -y wrangler@3 pages deploy _site --project-name ym-transfer --branch main --commit-dirty=true
+          ./node_modules/.bin/wrangler pages deploy _site --project-name ym-transfer --branch main --commit-dirty=true

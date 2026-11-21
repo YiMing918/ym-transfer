@@ -67,6 +67,7 @@ jobs:
           functions/api/upload-init.js
           functions/d/[id].js
           package.json
+          package-lock.json
           public/index.html
           public/_headers
           r2-cors.json
