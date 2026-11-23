@@ -6,7 +6,7 @@
 // 无法 import，改这里时记得同步前端那份（数值保持一致即可）。
 
 export const MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024;   // 单文件上限 5 GiB
-export const TOTAL_CAP_BYTES = 10 * 1024 * 1024 * 1024; // 站内总容量上限 10 GiB（免费 R2 上限）
+export const TOTAL_CAP_BYTES = 8 * 1024 * 1024 * 1024; // 站内总容量上限 8 GiB（2026-11-23 额度审计改：R2 免费额度 10GB 是整个账号共用的，博客的图床和备份桶也在同一个账号，原来定 10 GiB 等于文件中转一家就能占满整个账号、把博客挤爆；改成 8 GiB，给同账号其他桶留 2 GiB 余量）
 export const UPLOAD_URL_TTL_SEC = 6 * 3600;             // 上传地址有效 6 小时，覆盖慢速大文件上传
 // pending 保留必须 >= 上传地址有效期 + 缓冲：慢速大文件传满 6 小时才
 // complete 时记录不能已被清（v1.0 是 1 小时，5GB 慢传必被中途清记录，
