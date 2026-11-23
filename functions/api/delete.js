@@ -51,6 +51,11 @@ export async function onRequest(context) {
   // 残留最终由定时清理/桶生命周期兜底。老文件键没有配对键，自动跳过。
   const stagingKey = stagingKeyForFinal(row.r2_key);
   if (stagingKey) { try { await env.FILES.delete(stagingKey); } catch { /* 兜底同上 */ } }
-  try { await run(env, 'DELETE FROM files WHERE id = ?', id); } catch { /* 记录没删掉，定时清理会兜底 */ }
+  // 记录删不掉时不能谎报成功：对象已经没了、记录还在的话，下载入口会
+  // 照着记录去签直链、落到已删对象上（R2 原始 404，不是站内中文提示页），
+  // 而定时清理只清过期/超时行，这行没过期前不会被兜底。故删行失败回 500
+  // 让用户重试——重试时删对象是幂等的（删不存在的键照样成功），能自愈。
+  try { await run(env, 'DELETE FROM files WHERE id = ?', id); }
+  catch { return fail('delete_failed', '删除失败，请稍后再试', 500); }
   return json({ id, deleted: true });
 }
