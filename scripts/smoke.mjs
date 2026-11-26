@@ -126,7 +126,7 @@ await test('正常创建：返回 id、上传地址、下载链接，D1 里是 p
   ok(/^[0-9a-f]{32}$/.test(r.json.data.id), 'id 应为 32 位 hex');
   ok(r.json.data.upload_url.includes('X-Amz-Signature='), '应有签名');
   eq(r.json.data.download_url, `http://localhost/d/${r.json.data.id}`);
-  eq(r.json.data.expires_at - Math.floor(Date.now() / 1000) > 72 * 3600 - 5, true, '有效期应约 72 小时');
+  eq(r.json.data.expires_at - Math.floor(Date.now() / 1000) > 24 * 3600 - 5, true, '有效期应约 24 小时（请求里的 72 小时已被统一口径忽略）');
   const row = mock.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(r.json.data.id).first();
   eq(row.status, 'pending');
   eq(row.orig_name, '报告.pdf');
@@ -147,31 +147,25 @@ await test('大小边界：正好 5GB 通过', async () => {
   const r = await initFile(mock, { size: 5 * 1024 * 1024 * 1024 });
   eq(r.res.status, 200);
 });
-await test('有效期校验：只能 1、6、12 小时或 1、3、7 天', async () => {
+await test('有效期统一 24 小时：请求带什么 expires_hours 都忽略，存入的到期时间恒为约 24 小时后', async () => {
   const mock = freshEnv();
-  for (const hours of [0, 2, 3, 5, 48, 100, '24', null]) {
+  for (const hours of [0, 2, 48, '24', null, 1, 168]) {
     const r = await initFile(mock, { hours });
-    eq(r.res.status, 400, `hours=${hours} 应 400`);
-    eq(r.json.error.code, 'bad_expiry');
-  }
-  for (const hours of [1, 6, 12, 24, 72, 168]) {
-    const r = await initFile(mock, { hours });
-    eq(r.res.status, 200, `hours=${hours} 应通过`);
+    eq(r.res.status, 200, `hours=${hours} 应通过（统一口径，不再校验自选值）`);
+    const expect = Math.floor(Date.now() / 1000) + 24 * 3600;
+    if (Math.abs(r.json.data.expires_at - expect) > 15) throw new Error(`expires_at 应约为 24 小时后，实际差 ${r.json.data.expires_at - expect} 秒`);
+    const row = mock.env.DB.prepare('SELECT expires_at FROM files WHERE id = ?').bind(r.json.data.id).first();
+    eq(row.expires_at, r.json.data.expires_at, '存入的 expires_at 应与返回一致');
   }
 });
-await test('下载次数校验：只能不限、1、5、10 次，合法值存入 D1 并返回', async () => {
+await test('下载次数统一 3 次：请求带什么 max_downloads 都忽略，存入与返回恒为 3', async () => {
   const mock = freshEnv();
-  for (const md of [0, 2, 3, 100, '5', -1]) {
+  for (const md of [null, 0, 1, 5, 10, 100, '5']) {
     const r = await initFile(mock, { maxDownloads: md });
-    eq(r.res.status, 400, `max_downloads=${md} 应 400`);
-    eq(r.json.error.code, 'bad_max_downloads');
-  }
-  for (const md of [null, 1, 5, 10]) {
-    const r = await initFile(mock, { maxDownloads: md });
-    eq(r.res.status, 200, `max_downloads=${md} 应通过`);
-    eq(r.json.data.max_downloads, md, '返回里应有 max_downloads');
+    eq(r.res.status, 200, `max_downloads=${md} 应通过（统一口径）`);
+    eq(r.json.data.max_downloads, 3, '返回的 max_downloads 应恒为 3');
     const row = mock.env.DB.prepare('SELECT max_downloads FROM files WHERE id = ?').bind(r.json.data.id).first();
-    eq(row.max_downloads, md, `应存入 ${md}`);
+    eq(row.max_downloads, 3, '存入的 max_downloads 应恒为 3');
   }
 });
 await test('容量上限：站内差 1GB 满时，传 2GB 拒绝、传 1GB 通过', async () => {
