@@ -12,6 +12,7 @@ import * as deleteApi from '../functions/api/delete.js';
 import * as cleanupApi from '../functions/api/cleanup.js';
 import * as statsApi from '../functions/api/stats.js';
 import * as downloadRoute from '../functions/d/[id].js';
+import { TOTAL_CAP_BYTES } from '../functions/_lib/consts.js';
 
 const SECRET = 'test-secret-access-key-0123456789abcdef';
 const ENDPOINT = 'https://00000000000000000000000000000000.r2.cloudflarestorage.com';
@@ -173,14 +174,14 @@ await test('下载次数校验：只能不限、1、5、10 次，合法值存入
     eq(row.max_downloads, md, `应存入 ${md}`);
   }
 });
-await test('容量上限：站内 9GB 时，传 2GB 拒绝、传 1GB 通过', async () => {
+await test('容量上限：站内差 1GB 满时，传 2GB 拒绝、传 1GB 通过', async () => {
   const mock = freshEnv();
-  insertFileRow(mock, { id: 'a'.repeat(32), r2Key: 'f/2026/11/aaa', size: 9 * 1024 * 1024 * 1024, status: 'ready' });
+  insertFileRow(mock, { id: 'a'.repeat(32), r2Key: 'f/2026/11/aaa', size: TOTAL_CAP_BYTES - 1 * 1024 * 1024 * 1024, status: 'ready' });
   const r2 = await initFile(mock, { size: 2 * 1024 * 1024 * 1024 });
   eq(r2.res.status, 413);
   eq(r2.json.error.code, 'quota_full');
   const r1 = await initFile(mock, { size: 1 * 1024 * 1024 * 1024 });
-  eq(r1.res.status, 200, '9GB + 1GB = 10GB 整应通过');
+  eq(r1.res.status, 200, '差 1GB 满 + 1GB = 正好满额应通过');
 });
 await test('容量统计：已过期的 ready 不占容量，超时 pending 不占容量', async () => {
   const mock = freshEnv();
@@ -407,7 +408,7 @@ await test('返回已用字节与文件数', async () => {
   eq(r.res.status, 200);
   eq(r.json.data.used_bytes, 3000, '过期文件不应计入');
   eq(r.json.data.file_count, 2);
-  eq(r.json.data.total_cap_bytes, 10 * 1024 * 1024 * 1024);
+  eq(r.json.data.total_cap_bytes, TOTAL_CAP_BYTES);
   eq(r.json.data.max_file_bytes, 5 * 1024 * 1024 * 1024);
 });
 
