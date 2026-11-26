@@ -4,7 +4,7 @@
 import { json, fail, readJson, nowSec, ipHash, randomToken, sha256Hex, HttpError } from '../_lib/http.js';
 import { first, run } from '../_lib/db.js';
 import { presignPut, newStagingKey } from '../_lib/r2sign.js';
-import { MAX_FILE_BYTES, TOTAL_CAP_BYTES, UPLOAD_URL_TTL_SEC, PENDING_TTL_SEC, PENDING_CAP_BYTES } from '../_lib/consts.js';
+import { MAX_FILE_BYTES, TOTAL_CAP_BYTES, UPLOAD_URL_TTL_SEC, PENDING_TTL_SEC, PENDING_CAP_BYTES, MAX_DOWNLOADS, FILE_TTL_SEC } from '../_lib/consts.js';
 
 export { MAX_FILE_BYTES, TOTAL_CAP_BYTES };
 const RATE_LIMIT_PER_HOUR = 10;                            // 同一 IP 每小时最多创建 10 次上传
@@ -63,24 +63,18 @@ export async function onRequest(context) {
     return fail('bad_request', '请求体不合法', 400);
   }
   const size = body.size;
-  const expiresHours = body.expires_hours;
   const name = cleanFileName(body.name);
   const mime = cleanMime(body.mime);
   if (mime === null) {
     return fail('bad_mime', '文件类型不合法', 400);
   }
-  // 下载次数上限：不传或 null = 不限；传了必须是 1、5 或 10
-  const maxDownloads = body.max_downloads === undefined || body.max_downloads === null ? null : body.max_downloads;
-
   if (!Number.isInteger(size) || size < 1 || size > MAX_FILE_BYTES) {
     return fail('bad_size', '文件大小不合法（单个文件 1 字节～5GB）', 400);
   }
-  if (![1, 6, 12, 24, 72, 168].includes(expiresHours)) {
-    return fail('bad_expiry', '有效期只能是 1、6、12 小时或 1、3、7 天', 400);
-  }
-  if (maxDownloads !== null && ![1, 5, 10].includes(maxDownloads)) {
-    return fail('bad_max_downloads', '下载次数只能是不限、1 次、5 次或 10 次', 400);
-  }
+  // 有效期与下载次数全站统一（2026-11-26 YM 拍板）：存活 24 小时、最多下载
+  // 3 次，不再让上传者自选。请求里就算带了 expires_hours / max_downloads
+  // 也一律忽略（老前端/脚本照常能用），存进去的永远是下面两个常量。
+  const maxDownloads = MAX_DOWNLOADS;
 
   const now = nowSec();
   const ip = await ipHash(env, request);
@@ -120,7 +114,7 @@ export async function onRequest(context) {
   // 临时位置写，动不了正式文件。pending 期间记录的 r2_key 就是临时键，
   // 定时清理按记录删键时删的正是它，与旧流程半截文件的清理口径一致。
   const r2Key = newStagingKey();
-  const expiresAt = now + expiresHours * 3600;
+  const expiresAt = now + FILE_TTL_SEC;
 
   // 删除令牌（H4/M1）：建单时生成，明文只在这一次响应里给上传者，库里
   // 只存 SHA-256 哈希。凭它能提前删文件、complete 确认也要验它（所有权）。
