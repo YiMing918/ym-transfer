@@ -32,7 +32,7 @@ function cleanMime(mime) {
 }
 
 // pending 占额封顶（C-12）：pending 只是「声明要传」还没传一字节，空声明
-// 若按声明大小全额占容量，刷一批 pending 就能把全站 10GB 堵死。口径：
+// 若按声明大小全额占容量，刷一批 pending 就能把全站容量堵死。口径：
 // usedBytes 里 pending 部分最多计总盘的 1/3（PENDING_CAP_BYTES，定义在
 // consts.js、stats 共用同一口径），ready 全额计。正常慢传不受影响——
 // 文件照样能建、照样传，封顶只影响「pending 能替别人堵多少容量」。
@@ -87,11 +87,11 @@ export async function onRequest(context) {
   const windowStart = now - (now % 3600);
   const bucket = `upload:${ip}`;
 
-  // 容量：站内已用 + 本次 <= 10GB，否则拒绝（放在限流占位之前，
+  // 容量：站内已用 + 本次 <= TOTAL_CAP_BYTES，否则拒绝（放在限流占位之前，
   // 容量满的请求不消耗限流名额，与此前口径一致）
   const used = await usedBytes(env, now);
   if (used + size > TOTAL_CAP_BYTES) {
-    return fail('quota_full', '站内空间不足（总共 10GB），请等旧文件过期删除后再试', 413);
+    return fail('quota_full', `站内空间不足（总共 ${TOTAL_CAP_BYTES / (1024 * 1024 * 1024)}GB），请等旧文件过期删除后再试`, 413);
   }
 
   // 限流（C-11）：同一 IP 每小时最多创建 10 次上传。改成先原子自增拿
@@ -145,7 +145,7 @@ export async function onRequest(context) {
   const usedAfter = await usedBytes(env, now);
   if (usedAfter > TOTAL_CAP_BYTES) {
     await run(env, 'DELETE FROM files WHERE id = ?', id);
-    return fail('quota_full', '站内空间不足（总共 10GB），请等旧文件过期删除后再试', 413);
+    return fail('quota_full', `站内空间不足（总共 ${TOTAL_CAP_BYTES / (1024 * 1024 * 1024)}GB），请等旧文件过期删除后再试`, 413);
   }
 
   let signed;
