@@ -50,25 +50,9 @@ function makeEl(id) {
 
 function runPage(html, { protocol = 'file:', search = '' } = {}) {
   const script = extractScript(html);
-  const ids = ['previewBanner', 'dropZone', 'fileInput', 'fileInfo', 'fileName', 'fileMeta', 'expiryBox', 'expirySeg', 'dlBox', 'dlSeg', 'uploadBtn', 'progressBox', 'progText', 'progPct', 'progBar', 'progSpeed', 'progEta', 'resultBox', 'linkInput', 'copyBtn', 'resultMeta', 'tokenBox', 'tokenInput', 'copyTokenBtn', 'delLinkInput', 'delTokenInput', 'delBtn', 'delMsg', 'againBtn', 'errorBox', 'usedText', 'usedBar'];
+  const ids = ['previewBanner', 'dropZone', 'fileInput', 'fileInfo', 'fileName', 'fileMeta', 'expiryBox', 'uploadBtn', 'progressBox', 'progText', 'progPct', 'progBar', 'progSpeed', 'progEta', 'resultBox', 'linkInput', 'copyBtn', 'resultMeta', 'tokenBox', 'tokenInput', 'copyTokenBtn', 'delLinkInput', 'delTokenInput', 'delBtn', 'delMsg', 'againBtn', 'errorBox', 'usedText', 'usedBar'];
   const els = {};
   for (const id of ids) els[id] = makeEl(id);
-  // 有效期六个按钮（小时/天统一按小时算，默认 1 天 = 24 小时）
-  const segBtns = [1, 6, 12, 24, 72, 168].map((h) => {
-    const b = makeEl('seg-' + h);
-    b.__attrs = { 'data-hours': String(h) };
-    if (h === 24) b.classList.add('on');
-    return b;
-  });
-  els.expirySeg.querySelectorAll = () => segBtns;
-  // 下载次数四个按钮（默认不限）
-  const dlBtns = ['', 1, 5, 10].map((c) => {
-    const b = makeEl('dl-' + (c === '' ? 'unlimited' : c));
-    b.__attrs = { 'data-count': String(c) };
-    if (c === '') b.classList.add('on');
-    return b;
-  });
-  els.dlSeg.querySelectorAll = () => dlBtns;
   let execCopyCalled = false;
   const sandbox = {
     document: {
@@ -86,7 +70,7 @@ function runPage(html, { protocol = 'file:', search = '' } = {}) {
   sandbox.window = sandbox;
   const fn = new Function(...Object.keys(sandbox), script);
   fn(...Object.values(sandbox));
-  return { els, segBtns, dlBtns, isExecCopyCalled: () => execCopyCalled };
+  return { els, isExecCopyCalled: () => execCopyCalled };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -121,7 +105,6 @@ await test('选文件：显示文件名与大小，上传按钮可用', async ()
   assert.strictEqual(els.fileName.textContent, '我的文件.zip');
   assert.ok(els.fileMeta.textContent.includes('10.0 MB'), '应显示 10.0 MB');
   assert.strictEqual(els.expiryBox.style.display, 'block');
-  assert.strictEqual(els.dlBox.style.display, 'block', '下载次数选项应显示');
   assert.strictEqual(els.uploadBtn.disabled, false);
 });
 await test('超 5GB 文件：立即报错，不让上传', async () => {
@@ -149,6 +132,7 @@ await test('点上传：模拟进度走完，出下载链接；复制、再传�
   assert.ok(els.linkInput.value.includes('ym-transfer.pages.dev'), '链接应是本站域名');
   assert.ok(els.resultMeta.innerHTML.includes('报告.pdf'), '结果区应显示文件名');
   assert.ok(els.resultMeta.innerHTML.includes('到期自动删除'), '结果区应提示到期删除');
+  assert.ok(els.resultMeta.innerHTML.includes('最多可领取下载 3 次'), '结果区应提示最多下载 3 次');
   assert.strictEqual(els.tokenBox.style.display, 'block', '结果区应显示删除令牌');
   assert.ok(/^[0-9a-f]{32}$/.test(els.tokenInput.value), '令牌应是 32 位 hex');
   assert.strictEqual(els.delLinkInput.value, els.linkInput.value, '删除区应预填本次链接');
@@ -161,32 +145,13 @@ await test('点上传：模拟进度走完，出下载链接；复制、再传�
   assert.strictEqual(els.resultBox.style.display, 'none', '再传一个应隐藏结果');
   assert.strictEqual(els.uploadBtn.disabled, true, '再传一个后上传按钮应禁用');
 });
-await test('有效期切换：默认 1 天；点 7 天，按钮高亮跟着变', async () => {
-  const html = readFileSync(join(root, 'preview.html'), 'utf8');
-  const { els, segBtns } = runPage(html);
-  assert.ok(segBtns.find((b) => b.__attrs['data-hours'] === '24').classList.contains('on'), '默认应是 1 天高亮');
-  const btn168 = segBtns.find((b) => b.__attrs['data-hours'] === '168');
-  els.expirySeg.trigger('click', { target: btn168 });
-  assert.ok(btn168.classList.contains('on'), '7 天按钮应高亮');
-  assert.ok(!segBtns.find((b) => b.__attrs['data-hours'] === '24').classList.contains('on'), '1 天按钮应取消高亮');
-});
-await test('有效期切换：点 6 小时，高亮跟着变', async () => {
-  const html = readFileSync(join(root, 'preview.html'), 'utf8');
-  const { els, segBtns } = runPage(html);
-  const btn6 = segBtns.find((b) => b.__attrs['data-hours'] === '6');
-  els.expirySeg.trigger('click', { target: btn6 });
-  assert.ok(btn6.classList.contains('on'), '6 小时按钮应高亮');
-  assert.ok(!segBtns.find((b) => b.__attrs['data-hours'] === '24').classList.contains('on'), '1 天按钮应取消高亮');
-});
-await test('下载次数切换：默认不限；点 5 次，按钮高亮跟着变', async () => {
-  const html = readFileSync(join(root, 'preview.html'), 'utf8');
-  const { els, dlBtns } = runPage(html);
-  const unlimited = dlBtns.find((b) => b.__attrs['data-count'] === '');
-  assert.ok(unlimited.classList.contains('on'), '默认应是“不限”高亮');
-  const btn5 = dlBtns.find((b) => b.__attrs['data-count'] === '5');
-  els.dlSeg.trigger('click', { target: btn5 });
-  assert.ok(btn5.classList.contains('on'), '5 次按钮应高亮');
-  assert.ok(!unlimited.classList.contains('on'), '“不限”按钮应取消高亮');
+await test('有效期与下载次数不再有选择器：两页都不含 data-hours / data-count 按钮', async () => {
+  for (const f of ['public/index.html', 'preview.html']) {
+    const html = readFileSync(join(root, f), 'utf8');
+    assert.ok(!html.includes('data-hours'), f + ' 不应再有有效期选择按钮');
+    assert.ok(!html.includes('data-count'), f + ' 不应再有下载次数选择按钮');
+    assert.ok(html.includes('24 小时') && html.includes('3 次'), f + ' 应写明统一规则（24 小时 / 3 次）');
+  }
 });
 
 console.log(`\n结果：通过 ${pass}，失败 ${fail}`);
