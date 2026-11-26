@@ -14,6 +14,7 @@ import * as deleteApi from '../functions/api/delete.js';
 import * as cleanupApi from '../functions/api/cleanup.js';
 import * as statsApi from '../functions/api/stats.js';
 import * as downloadRoute from '../functions/d/[id].js';
+import { TOTAL_CAP_BYTES } from '../functions/_lib/consts.js';
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 let pass = 0, fail = 0;
@@ -251,7 +252,7 @@ async function main() {
     const j = await r.json();
     assert.strictEqual(r.status, 200);
     assert.ok(j.data.used_bytes >= 150 * 1024 * 1024, '已用应至少含 150MB 文件');
-    assert.strictEqual(j.data.total_cap_bytes, 10 * 1024 * 1024 * 1024);
+    assert.strictEqual(j.data.total_cap_bytes, TOTAL_CAP_BYTES);
   });
 
   fakeR2.close();
